@@ -5,66 +5,194 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Mooni Story Studio</title>
 <style>
+  *{box-sizing:border-box}
   body{margin:0;font-family:system-ui,sans-serif;background:#0b1530;color:#f5efe0;padding:16px}
-  .wrap{max-width:640px;margin:auto}
+  .wrap{max-width:680px;margin:auto}
   h1{color:#ffd978;margin:0 0 4px}
   .sub{margin:0 0 16px;opacity:.8}
-  label{display:block;margin:12px 0 4px;font-weight:600}
-  input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #3a4a7a;background:#14204a;color:#fff;font-size:16px;box-sizing:border-box}
-  button{margin-top:16px;padding:12px 16px;border:0;border-radius:8px;background:#ffd978;color:#0b1530;font-weight:700;font-size:16px;cursor:pointer}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  @media(max-width:420px){.grid{grid-template-columns:1fr}}
+  label{display:block;margin:10px 0 4px;font-weight:600;font-size:14px}
+  input,select{width:100%;padding:10px;border-radius:8px;border:1px solid #3a4a7a;background:#14204a;color:#fff;font-size:16px}
+  .row{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  button{padding:12px 16px;border:0;border-radius:8px;background:#ffd978;color:#0b1530;font-weight:700;font-size:16px;cursor:pointer}
+  button.alt{background:#2a3b73;color:#ffd978}
   .card{background:#14204a;border-radius:12px;padding:12px;margin-top:14px}
   .card h3{margin:0 0 6px;color:#ffd978;font-size:16px}
-  .card pre{white-space:pre-wrap;margin:0 0 8px;font-family:inherit;font-size:14px}
-  .small{padding:6px 10px;font-size:13px;margin:0}
+  .card pre{white-space:pre-wrap;margin:0 0 8px;font-family:inherit;font-size:14px;line-height:1.4}
+  .small{padding:6px 10px;font-size:13px}
+  .hidden{display:none}
+  .title{font-size:20px;color:#ffd978;margin:18px 0 0;font-weight:700}
 </style>
 </head>
 <body>
 <div class="wrap">
   <h1>🌙 Mooni Story Studio</h1>
-  <p class="sub">Scene prompts, caption and hashtags for a new Mooni episode.</p>
+  <p class="sub">Build a new Mooni episode: story idea, scene prompts, caption and hashtags.</p>
 
-  <label for="place">Where does the story happen?</label>
-  <select id="place">
-    <option>a rainy street</option>
-    <option>a crowded train</option>
-    <option>a night market</option>
-    <option>a birthday party</option>
-    <option>a school bag</option>
-    <option>a quiet park</option>
-  </select>
+  <div class="grid">
+    <div><label for="place">Place</label><select id="place"></select></div>
+    <div><label for="time">Time of day</label><select id="time"></select></div>
+    <div><label for="weather">Weather</label><select id="weather"></select></div>
+    <div><label for="side">Side character</label><select id="side"></select></div>
+    <div><label for="problem">Story problem</label><select id="problem"></select></div>
+    <div><label for="magic">Mooni's magic</label><select id="magic"></select></div>
+    <div><label for="mood">Mood</label><select id="mood"></select></div>
+    <div><label for="style">Art style</label><select id="style"></select></div>
+    <div><label for="length">Episode length</label><select id="length"></select></div>
+    <div><label for="lang">Caption language</label><select id="lang"></select></div>
+    <div><label for="platform">Platform</label><select id="platform"></select></div>
+    <div><label for="ep">Episode number (optional)</label><input id="ep" type="number" min="1" placeholder="e.g. 1"></div>
+  </div>
 
-  <label for="goal">What does Mooni help with?</label>
-  <input id="goal" placeholder="e.g. helps a lost kitten find home">
+  <div id="customBox" class="hidden">
+    <label for="custom">Write your own story problem</label>
+    <input id="custom" placeholder="e.g. helps a street vendor sell his last toys">
+  </div>
 
-  <label for="mood">Mood</label>
-  <select id="mood">
-    <option>cozy</option>
-    <option>funny</option>
-    <option>magical</option>
-    <option>emotional</option>
-  </select>
+  <div class="row">
+    <button id="go">Generate episode</button>
+    <button id="surprise" class="alt">🎲 Surprise me</button>
+  </div>
 
-  <button id="go">Generate episode</button>
   <div id="out"></div>
 </div>
 
 <script>
-const CHAR = "Mooni, a tiny glowing crescent-moon creature the size of an apple, soft cream body with a gentle gold glow, large round dark eyes, small star-shaped tail that glows brighter when happy and dims when sad, no outlines, smooth 3D cartoon style, warm night-blue lighting, cute and expressive";
+const $ = id => document.getElementById(id);
+
+const DATA = {
+  place: [
+    {en:"a rainy street", hi:"बारिश वाली सड़क", hl:"baarish wali sadak"},
+    {en:"a crowded train", hi:"भीड़ वाली ट्रेन", hl:"bheed wali train"},
+    {en:"a night market", hi:"रात का बाज़ार", hl:"raat ka bazaar"},
+    {en:"a birthday party", hi:"बर्थडे पार्टी", hl:"birthday party"},
+    {en:"a school bag", hi:"स्कूल बैग", hl:"school bag"},
+    {en:"a quiet park", hi:"शांत पार्क", hl:"shaant park"},
+    {en:"a busy kitchen", hi:"व्यस्त रसोई", hl:"busy rasoi"},
+    {en:"a festival of lights", hi:"रोशनी का त्योहार", hl:"roshni ka tyohar"},
+    {en:"a small village lane", hi:"गाँव की गली", hl:"gaon ki gali"},
+    {en:"a seaside beach", hi:"समुद्र किनारा", hl:"samundar kinara"}
+  ],
+  time: ["at sunrise","in the afternoon","at golden sunset","at night under the stars","at midnight"],
+  weather: ["clear sky","soft rain","gentle snow","thick fog","windy with floating leaves","warm summer breeze"],
+  side: [
+    "a curious kitten","a shy firefly","a sleepy old man","a cheerful little girl","a grumpy crow",
+    "a tiny robot","a friendly stray puppy","a gentle cow","a young boy with a kite","a wise old turtle"
+  ],
+  problem: [
+    {title:"Lost Kitten", scene:"a lost kitten is crying and cannot find its way home",
+      en:"helped a lost kitten find its way home", hi:"खोए हुए बिल्ली के बच्चे को घर का रास्ता दिखाया", hl:"khoye hue billi ke bachche ko ghar ka rasta dikhaya"},
+    {title:"Sad Little Child", scene:"a little child is sitting sadly alone",
+      en:"cheered up a sad little child", hi:"उदास बच्चे को हँसाया", hl:"udaas bachche ko hansaya"},
+    {title:"Runaway Balloon", scene:"a colorful balloon has slipped away and is floating off",
+      en:"rescued a runaway balloon", hi:"उड़ते हुए गुब्बारे को बचाया", hl:"udte hue gubbare ko bachaya"},
+    {title:"Lost Key", scene:"someone has lost an important key in the dark",
+      en:"found a lost key", hi:"खोई हुई चाबी ढूँढ़ी", hl:"khoyi hui chaabi dhoondhi"},
+    {title:"Scared Puppy", scene:"a scared puppy is hiding in a dark corner",
+      en:"comforted a scared puppy in the dark", hi:"अँधेरे में डरे हुए पिल्ले को हिम्मत दी", hl:"andhere mein dare hue pille ko himmat di"},
+    {title:"Tired Grandmother", scene:"a tired grandmother is struggling with heavy bags",
+      en:"helped a tired grandmother carry her bags", hi:"थकी हुई दादी का सामान उठाने में मदद की", hl:"thaki hui dadi ka saaman uthane mein madad ki"},
+    {title:"Broken Kite", scene:"a boy's kite is torn and he looks upset",
+      en:"fixed a broken kite", hi:"टूटी हुई पतंग जोड़ दी", hl:"tooti hui patang jod di"},
+    {title:"Lost Letter", scene:"a handwritten letter has fallen on the ground and nobody has noticed",
+      en:"delivered a lost letter", hi:"खोई हुई चिट्ठी पहुँचाई", hl:"khoyi hui chitthi pahunchai"},
+    {title:"Shy Firefly", scene:"a shy firefly is hiding and afraid to glow",
+      en:"made friends with a shy firefly", hi:"शर्मीले जुगनू से दोस्ती की", hl:"sharmeele jugnu se dosti ki"}
+  ],
+  magic: [
+    "makes glowing light trails","makes flowers bloom","makes things float gently","glows to guide the way",
+    "turns raindrops into tiny stars","freezes time for a second","makes music from soft chimes","heals small broken things"
+  ],
+  mood: [
+    {name:"cozy", emoji:"🧡", music:"soft lo-fi piano with warm pads"},
+    {name:"funny", emoji:"😂", music:"playful pizzicato strings and light percussion"},
+    {name:"magical", emoji:"✨", music:"twinkling chimes with airy synth"},
+    {name:"emotional", emoji:"🥹", music:"slow gentle piano and soft strings"},
+    {name:"adventurous", emoji:"🧭", music:"light upbeat acoustic guitar with hand claps"},
+    {name:"mysterious", emoji:"🌫️", music:"low soft pads with distant chimes"},
+    {name:"heartwarming", emoji:"💛", music:"warm acoustic guitar and soft humming"}
+  ],
+  style: [
+    "smooth 3D cartoon","soft watercolor storybook","cozy claymation","flat pastel 2D",
+    "dreamy glowing illustration","paper-cut layered art"
+  ],
+  length: [
+    {name:"15 sec · 3 scenes", beats:["open","magic","end"], sec:5},
+    {name:"30 sec · 5 scenes", beats:["open","discover","try","magic","end"], sec:6},
+    {name:"45 sec · 6 scenes", beats:["open","discover","try","setback","magic","end"], sec:7}
+  ],
+  lang: ["English","Hindi","Hinglish"],
+  platform: ["Instagram Reels","YouTube Shorts","Both"]
+};
+
+const BEAT_TITLES = {
+  open:"Opening", discover:"Discovery", try:"First attempt",
+  setback:"Setback", magic:"Magic moment", end:"Ending"
+};
+
+const BEATS = {
+  open: c => `Mooni wakes up inside a jacket pocket and peeks out at ${c.place.en} ${c.time}, ${c.weather}, ${c.mood.name} mood`,
+  discover: c => `Mooni notices that ${c.scene}, and ${c.side} is nearby`,
+  try: c => `Mooni tries to help but it goes slightly wrong, a clumsy cute moment, her star tail flickers nervously`,
+  setback: c => `Mooni's glow dims and she looks worried for a moment while ${c.side} looks at her hopefully`,
+  magic: c => `Mooni ${c.magic}, her glow grows bright and warm, and the problem is solved`,
+  end: c => `A warm closing moment, Mooni snuggles back into the pocket, her glow softly dims, the final frame matches the opening frame so the video loops`
+};
+
+function fill(id, list, label) {
+  const s = $(id);
+  list.forEach((item, i) => {
+    const o = document.createElement("option");
+    o.value = i;
+    o.textContent = label ? label(item) : item;
+    s.appendChild(o);
+  });
+}
+
+fill("place", DATA.place, p => p.en);
+fill("time", DATA.time);
+fill("weather", DATA.weather);
+fill("side", DATA.side);
+fill("problem", DATA.problem, p => p.title);
+(function () {
+  const o = document.createElement("option");
+  o.value = "custom";
+  o.textContent = "✍️ Write my own";
+  $("problem").appendChild(o);
+})();
+fill("magic", DATA.magic);
+fill("mood", DATA.mood, m => m.name);
+fill("style", DATA.style);
+fill("length", DATA.length, l => l.name);
+fill("lang", DATA.lang);
+fill("platform", DATA.platform);
+$("length").value = "1";
+
+$("problem").onchange = () => {
+  $("customBox").classList.toggle("hidden", $("problem").value !== "custom");
+};
+
+const pick = (id, list) => list[parseInt($(id).value, 10)];
+
+function charText(style) {
+  return `Mooni, a tiny glowing crescent-moon creature the size of an apple, soft cream body with a gentle gold glow, large round dark eyes, small star-shaped tail that glows brighter when happy and dims when sad, no outlines, ${style} style, cute and expressive`;
+}
 
 function fallback(text, done) {
   const t = document.createElement("textarea");
   t.value = text;
   document.body.appendChild(t);
   t.select();
-  document.execCommand("copy");
+  try { document.execCommand("copy"); } catch (e) {}
   t.remove();
   done();
 }
 
-function copy(text, btn) {
+function copy(text, btn, label) {
   const done = () => {
     btn.textContent = "Copied!";
-    setTimeout(() => (btn.textContent = "Copy"), 1200);
+    setTimeout(() => (btn.textContent = label), 1200);
   };
   if (navigator.clipboard) {
     navigator.clipboard.writeText(text).then(done).catch(() => fallback(text, done));
@@ -83,32 +211,114 @@ function addCard(parent, title, text) {
   const btn = document.createElement("button");
   btn.className = "small";
   btn.textContent = "Copy";
-  btn.onclick = () => copy(text, btn);
+  btn.onclick = () => copy(text, btn, "Copy");
   card.append(h, pre, btn);
   parent.appendChild(card);
 }
 
-document.getElementById("go").onclick = () => {
-  const place = document.getElementById("place").value;
-  const goal = document.getElementById("goal").value.trim() || "helps someone who needs a little light";
-  const mood = document.getElementById("mood").value;
-  const out = document.getElementById("out");
+function buildCaption(langName, c, goal) {
+  const e = c.mood.emoji;
+  if (langName === "Hindi") {
+    const place = c.customGoal ? "" : c.place.hi + " में ";
+    return `🌙 ${place}मूनी! आज मूनी ने ${goal.hi}। ${e} और छोटे चाँद की कहानियों के लिए फ़ॉलो करें ✨`;
+  }
+  if (langName === "Hinglish") {
+    const place = c.customGoal ? "" : c.place.hl + " mein ";
+    return `🌙 ${place}Mooni! Aaj Mooni ne ${goal.hl}. ${e} Aur tiny moon stories ke liye follow karein ✨`;
+  }
+  return `🌙 Mooni in ${c.place.en}! Today she ${goal.en}. ${e} Follow for more tiny moon adventures ✨`;
+}
+
+function generate() {
+  const out = $("out");
   out.innerHTML = "";
 
-  const scenes = [
-    ["Scene 1: Opening", `Mooni wakes up inside a jacket pocket, ${place} visible outside the pocket opening, ${mood} mood`],
-    ["Scene 2: Discovery", `Mooni peeks out and notices something in ${place}: she ${goal}`],
-    ["Scene 3: Attempt", `Mooni tries to help but it goes slightly wrong, clumsy cute moment, star tail flickers`],
-    ["Scene 4: Magic", `Mooni uses a tiny bit of moon magic, her glow grows bright, she ${goal}`],
-    ["Scene 5: Ending", `Warm closing moment, Mooni snuggles back into the pocket, glow softly dims, final frame matches the opening frame so the video loops`]
-  ];
+  const c = {
+    place: pick("place", DATA.place),
+    time: pick("time", DATA.time),
+    weather: pick("weather", DATA.weather),
+    side: pick("side", DATA.side),
+    magic: pick("magic", DATA.magic),
+    mood: pick("mood", DATA.mood),
+    style: pick("style", DATA.style),
+    length: pick("length", DATA.length),
+    lang: pick("lang", DATA.lang),
+    platform: pick("platform", DATA.platform)
+  };
 
-  scenes.forEach(([title, desc]) => {
-    addCard(out, title, `${CHAR}. Scene: ${desc}. Vertical 9:16, 6-8 seconds.`);
+  let goal, titleCore;
+  if ($("problem").value === "custom") {
+    const text = $("custom").value.trim() || "helps someone who needs a little light";
+    c.customGoal = true;
+    c.scene = `someone needs help: ${text}`;
+    goal = {en: text, hi: text, hl: text};
+    titleCore = "Mooni's New Adventure";
+  } else {
+    const p = pick("problem", DATA.problem);
+    c.scene = p.scene;
+    goal = p;
+    titleCore = `Mooni and the ${p.title}`;
+  }
+
+  const ep = $("ep").value.trim();
+  const title = (ep ? `Episode ${ep}: ` : "") + titleCore;
+  const all = [];
+
+  const heading = document.createElement("div");
+  heading.className = "title";
+  heading.textContent = title;
+  out.appendChild(heading);
+  all.push(title);
+
+  const idea = `In ${c.place.en} ${c.time} (${c.weather}), ${c.scene}. With ${c.side} nearby, Mooni ${c.magic}. Mood: ${c.mood.name}. Style: ${c.style}.`;
+  addCard(out, "Story idea", idea);
+  all.push("STORY IDEA\n" + idea);
+
+  c.length.beats.forEach((key, i) => {
+    const desc = BEATS[key](c);
+    const prompt = `${charText(c.style)}. Scene: ${desc}. Setting: ${c.place.en}, ${c.time}, ${c.weather}. Vertical 9:16, ${c.length.sec} seconds, consistent character design.`;
+    const label = `Scene ${i + 1}: ${BEAT_TITLES[key]}`;
+    addCard(out, label, prompt);
+    all.push(label.toUpperCase() + "\n" + prompt);
   });
 
-  addCard(out, "Caption", `Mooni in ${place} 🌙✨ A tiny moon who ${goal}. Follow for more tiny moon adventures!`);
-  addCard(out, "Hashtags", "#mooni #cartoon #cutecartoon #shorts #reels #animation #bedtimestory #moon");
+  const caption = buildCaption(c.lang, c, goal);
+  addCard(out, "Caption (" + c.lang + ")", caption);
+  all.push("CAPTION\n" + caption);
+
+  const tags = ["#mooni", "#cartoon", "#cutecartoon", "#animation", "#bedtimestory", "#moon", "#" + c.mood.name];
+  if (c.platform !== "YouTube Shorts") tags.push("#reels", "#instareels", "#explore");
+  if (c.platform !== "Instagram Reels") tags.push("#shorts", "#youtubeshorts");
+  addCard(out, "Hashtags", tags.join(" "));
+  all.push("HASHTAGS\n" + tags.join(" "));
+
+  const sound = `Music: ${c.mood.music}.\nSound effects: a soft chime when Mooni glows, a tiny squeak when she is surprised, a gentle whoosh for her magic.\nEditing: keep the same cream, gold and night-blue colors in every clip, add subtitles, and end on the opening frame so the video loops.`;
+  addCard(out, "Sound and editing notes", sound);
+  all.push("SOUND AND EDITING\n" + sound);
+
+  const full = all.join("\n\n");
+  const row = document.createElement("div");
+  row.className = "row";
+  const b = document.createElement("button");
+  b.textContent = "Copy everything";
+  b.onclick = () => copy(full, b, "Copy everything");
+  row.appendChild(b);
+  out.appendChild(row);
+
+  heading.scrollIntoView({behavior: "smooth"});
+}
+
+$("go").onclick = generate;
+
+$("surprise").onclick = () => {
+  const ids = ["place", "time", "weather", "side", "magic", "mood", "style"];
+  ids.forEach(id => {
+    const s = $(id);
+    s.selectedIndex = Math.floor(Math.random() * s.options.length);
+  });
+  $("problem").selectedIndex = Math.floor(Math.random() * DATA.problem.length);
+  $("customBox").classList.add("hidden");
+  generate();
 };
 </script>
 </body>

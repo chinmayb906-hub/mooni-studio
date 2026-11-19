@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -28,8 +28,19 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python studio.py
 
+      - name: Download video footage
+        env:
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+        run: python pixabay.py
+
       - name: Save episode
         uses: actions/upload-artifact@v4
         with:
           name: mooni-studio-episode
           path: output/episode.json
+
+      - name: Save downloaded video clips
+        uses: actions/upload-artifact@v4
+        with:
+          name: mooni-video-clips
+          path: output/clips/

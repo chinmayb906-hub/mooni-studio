@@ -1,68 +1,66 @@
 
 import os
 import json
-from google import genai
+import re
+import requests
 
-API_KEY = os.environ.get("GEMINI_API_KEY")
+API_KEY = os.environ.get("PIXABAY_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is missing.")
+    raise RuntimeError("PIXABAY_API_KEY is missing.")
 
-client = genai.Client(api_key=API_KEY)
+API_URL = "https://pixabay.com/api/videos/"
 
-PROMPT = """
-Create an original 60-second cartoon episode for children.
 
-Requirements:
-- Create an original and entertaining story.
-- Use friendly characters.
-- Include six scenes.
-- Include visual descriptions.
-- Include narration.
-- Include character dialogue.
-- Give the story a happy ending.
+def main():
+    with open("output/episode.json", "r", encoding="utf-8") as file:
+        episode = json.load(file)
 
-Return valid JSON only:
-{
-  "title": "Episode title",
-  "description": "Short description",
-  "scenes": [
-    {
-      "scene": 1,
-      "visual": "Scene description",
-      "narration": "Narration text",
-      "dialogue": "Character dialogue"
-    }
-  ]
-}
-"""
+    os.makedirs("output/clips", exist_ok=True)
+    downloaded = 0
 
-def generate_episode():
-    response = client.models.generate_content(
-        model="gemini-2.5-flash",
-        contents=PROMPT
-    )
+    for index, scene in enumerate(episode.get("scenes", []), 1):
+        words = re.findall(r"[A-Za-z0-9]+", scene.get("visual", ""))
+        query = " ".join(words[:6]) or "cartoon nature"
 
-    result = response.text.strip()
+        response = requests.get(
+            API_URL,
+            params={
+                "key": API_KEY,
+                "q": query,
+                "per_page": 3,
+                "safesearch": "true"
+            },
+            timeout=30
+        )
+        response.raise_for_status()
 
-    if result.startswith("```"):
-        result = result.split("\n", 1)[1]
-        result = result.rsplit("```", 1)[0].strip()
+        hits = response.json().get("hits", [])
+        if not hits:
+            print(f"No video found for scene {index}")
+            continue
 
-    episode = json.loads(result)
+        videos = hits[0].get("videos", {})
+        video = videos.get("medium") or videos.get("small")
 
-    if not episode.get("title") or not episode.get("scenes"):
-        raise ValueError("Generated episode is incomplete.")
+        if not video or not video.get("url"):
+            continue
 
-    os.makedirs("output", exist_ok=True)
+        clip = requests.get(video["url"], timeout=60)
+        clip.raise_for_status()
 
-    with open("output/episode.json", "w", encoding="utf-8") as file:
-        json.dump(episode, file, ensure_ascii=False, indent=2)
+        path = f"output/clips/scene_{index:02d}.mp4"
+        with open(path, "wb") as file:
+            file.write(clip.content)
 
-    print("Episode generated successfully!")
-    print("Title:", episode["title"])
-    print("Scenes:", len(episode["scenes"]))
+        downloaded += 1
+        print(f"Downloaded {path}")
+
+    if downloaded == 0:
+        raise RuntimeError("No Pixabay clips downloaded.")
+
+    print(f"Downloaded {downloaded} clips successfully.")
 
 
 if __name__ == "__main__":
-    generate_episode()
+    main()

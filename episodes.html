@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mooni Episodes</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,sans-serif;background:#0b1530;color:#f5efe0;padding:16px}
+  .wrap{max-width:420px;margin:auto}
+  h1{color:#ffd978;margin:0 0 4px}
+  .sub{margin:0 0 14px;opacity:.8;font-size:14px}
+  label{display:block;margin:12px 0 6px;font-weight:600;font-size:14px}
+  select{width:100%;padding:10px;border-radius:8px;border:1px solid #3a4a7a;background:#14204a;color:#fff;font-size:16px}
+  .pills{display:flex;gap:8px}
+  .pill{flex:1;padding:10px 6px;border-radius:999px;border:1px solid #3a4a7a;background:#14204a;color:#f5efe0;font-size:15px;font-weight:600;cursor:pointer}
+  .pill.active{background:#ffd978;color:#0b1530;border-color:#ffd978}
+  .row{display:flex;gap:10px;margin:14px 0;flex-wrap:wrap}
+  button.main,a.btn{padding:12px 16px;border:0;border-radius:8px;background:#ffd978;color:#0b1530;font-weight:700;font-size:16px;cursor:pointer;text-decoration:none;display:inline-block}
+  button.alt{padding:12px 16px;border:0;border-radius:8px;background:#2a3b73;color:#ffd978;font-weight:700;font-size:15px;cursor:pointer}
+  button:disabled{opacity:.5}
+  canvas{width:100%;max-width:360px;aspect-ratio:9/16;border-radius:14px;display:block;margin:10px auto;background:#000}
+  #status{font-size:14px;color:#9fb0e0;min-height:20px;text-align:center}
+  .card{background:#14204a;border-radius:12px;padding:12px;margin-top:10px}
+  .card h3{margin:0 0 6px;color:#ffd978;font-size:15px}
+  .card p{margin:0;font-size:15px;line-height:1.45}
+  #result{margin-top:10px;text-align:center}
+  #result video{width:100%;max-width:360px;border-radius:12px;margin-bottom:10px}
+  .note{font-size:12px;opacity:.7;margin-top:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>🌙 Mooni Episodes</h1>
+  <p class="sub">Pick a language and an episode, then play it or create a video to download.</p>
+
+  <label>Language</label>
+  <div class="pills" id="pills"></div>
+
+  <label for="ep">Episode</label>
+  <select id="ep"></select>
+
+  <canvas id="cv" width="540" height="960"></canvas>
+  <div id="status"></div>
+
+  <div class="row">
+    <button class="main" id="play">▶ Play</button>
+    <button class="main" id="rec">🎬 Create video</button>
+  </div>
+
+  <div id="result"></div>
+
+  <div class="row">
+    <button class="alt" id="copyStory">Copy story</button>
+    <button class="alt" id="copyPrompts">Copy AI prompts</button>
+  </div>
+  <div id="story"></div>
+  <p class="note">Videos are saved as WebM (works best in Chrome). If Instagram does not accept the file, open it in CapCut and export as MP4.</p>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const cv = $("cv"), ctx = cv.getContext("2d");
+const R = cv.width / 360;
+
+const LN = ["English", "हिन्दी", "Hinglish"];
+const INTRO = 2.5, SCENE = 5.5, OUTRO = 2.5;
+const OUTRO_TXT = ["Follow for more Mooni stories", "और मूनी की कहानियों के लिए फ़ॉलो करें", "Aur Mooni stories ke liye follow karein"];
+const BGNAME = {
+  home: "inside a home in the morning", street: "a quiet street", rain: "a rainy street in the evening",
+  station: "a railway station", night: "a street at night", party: "a cozy living room"
+};
+const CHAR = "Mooni, a tiny glowing crescent-moon creature the size of an apple, soft cream body with a gentle gold glow, large round dark eyes, small star-shaped tail, no outlines, smooth 3D cartoon style";
+
+/* Each episode: t = title [en, hi, hinglish]; cast = people; sc = scenes.
+   Scene: bg, who (indexes into cast), glow, dim, l = line [en, hi, hinglish] */
+const EPS = [
+{
+  t: ["The Lost Key", "खोई हुई चाबी", "Khoyi Hui Chaabi"],
+  cast: [
+    {n: ["Riya", "रिया"], k: "kid", c: "#e86a92"},
+    {n: ["Papa", "पापा"], k: "adult", c: "#3d6fd1"}
+  ],
+  sc: [
+    {bg: "home", who: [0, 1], l: [
+      "Morning at home. Riya is late for school, and Papa is leaving for work.",
+      "सुबह का समय है। रिया को स्कूल के लिए देर हो रही है और पापा काम पर निकल रहे हैं।",
+      "Subah ka time hai. Riya ko school ke liye der ho rahi hai aur Papa kaam par nikal rahe hain."]},
+    {bg: "street", who: [0], l: [
+      "At the gate, Riya checks her pocket. The house key is gone!",
+      "गेट पर रिया ने जेब देखी। घर की चाबी गायब है!",
+      "Gate par Riya ne jeb dekhi. Ghar ki chaabi gayab hai!"]},
+    {bg: "street", who: [0], dim: 1, shine: 1, l: [
+      "Mooni peeks out of the pocket and notices a tiny shine near the drain.",
+      "मूनी जेब से झाँकती है और नाली के पास एक हल्की चमक देखती है।",
+      "Mooni jeb se jhaankti hai aur naali ke paas ek halki chamak dekhti hai."]},
+    {bg: "street", who: [0], glow: 1, shine: 1, l: [
+      "Mooni glows softly. Riya follows the light and finds the key under a leaf.",
+      "मूनी हल्का सा चमकती है। रिया रोशनी के पीछे जाकर पत्ते के नीचे चाबी ढूँढ लेती है।",
+      "Mooni halka sa chamakti hai. Riya roshni ke peeche jaakar patte ke neeche chaabi dhoondh leti hai."]},
+    {bg: "street", who: [0, 1], l: [
+      "Papa hugs Riya and says: always check twice. Riya smiles and runs to school.",
+      "पापा रिया को गले लगाकर कहते हैं: हमेशा दो बार देख लिया करो। रिया मुस्कुराकर स्कूल दौड़ पड़ती है।",
+      "Papa Riya ko gale lagakar kehte hain: hamesha do baar dekh liya karo. Riya muskurakar school daud padti hai."]}
+  ]
+},
+{
+  t: ["Rainy Evening", "बारिश की शाम", "Baarish Ki Shaam"],
+  cast: [
+    {n: ["Aarav", "आरव"], k: "kid", c: "#4caf7a"},
+    {n: ["Raju Uncle", "राजू अंकल"], k: "adult", c: "#f08a32"},
+    {n: ["Neha", "नेहा"], k: "kid", c: "#9b6fd6"}
+  ],
+  sc: [
+    {bg: "rain", who: [1], l: [
+      "It is raining hard. Raju Uncle's corn cart is empty, and he looks tired.",
+      "तेज़ बारिश हो रही है। राजू अंकल की भुट्टे की ठेली खाली है और वे थके हुए दिख रहे हैं।",
+      "Tez baarish ho rahi hai. Raju Uncle ki bhutte ki thaeli khaali hai aur woh thake hue dikh rahe hain."]},
+    {bg: "rain", who: [0, 1], l: [
+      "Little Aarav walks home with his umbrella and smells the roasted corn.",
+      "छोटा आरव छाता लेकर घर जा रहा है और भुने हुए भुट्टे की खुशबू पहचान लेता है।",
+      "Chhota Aarav chhata lekar ghar ja raha hai aur bhune hue bhutte ki khushboo pehchaan leta hai."]},
+    {bg: "rain", who: [0, 1], dim: 1, l: [
+      "The wind blows out the cart's lamp. Raju Uncle cannot see his customers.",
+      "हवा से ठेली का दीया बुझ जाता है। राजू अंकल को ग्राहक दिखाई नहीं देते।",
+      "Hawa se thaeli ka diya bujh jaata hai. Raju Uncle ko grahak dikhaai nahi dete."]},
+    {bg: "rain", who: [0, 1], glow: 1, l: [
+      "Mooni glows from Aarav's bag, and the cart lights up like a warm lantern.",
+      "आरव के बैग से मूनी चमकती है और ठेली एक गर्म लालटेन की तरह जगमगा उठती है।",
+      "Aarav ke bag se Mooni chamakti hai aur thaeli ek garm lalten ki tarah jagmaga uthti hai."]},
+    {bg: "rain", who: [0, 1, 2], l: [
+      "People gather in the warm light. Neha joins, and Aarav shares hot corn with her.",
+      "गर्म रोशनी में लोग इकट्ठा हो जाते हैं। नेहा भी आ जाती है और आरव उसके साथ गर्म भुट्टा बाँटता है।",
+      "Garm roshni mein log ikattha ho jaate hain. Neha bhi aa jaati hai aur Aarav uske saath garm bhutta baantta hai."]}
+  ]
+},
+{
+  t: ["Dadi's Bags", "दादी का सामान", "Dadi Ka Saaman"],
+  cast: [
+    {n: ["Kabir", "कबीर"], k: "kid", c: "#e0524d"},
+    {n: ["Dadi", "दादी"], k: "elder", c: "#9b7bb8"},
+    {n: ["Mummy", "मम्मी"], k: "adult", c: "#2fa6a0"}
+  ],
+  sc: [
+    {bg: "station", who: [1], l: [
+      "At the railway station, Dadi struggles with two heavy bags.",
+      "रेलवे स्टेशन पर दादी दो भारी बैग उठाने में परेशान हैं।",
+      "Railway station par Dadi do bhaari bag uthane mein pareshaan hain."]},
+    {bg: "station", who: [0, 2], l: [
+      "Kabir and his mother are waiting for the same train, and they notice her.",
+      "कबीर और उसकी मम्मी उसी ट्रेन का इंतज़ार कर रहे हैं और दादी को देख लेते हैं।",
+      "Kabir aur uski Mummy usi train ka intezaar kar rahe hain aur Dadi ko dekh lete hain."]},
+    {bg: "station", who: [0, 2, 1], dim: 1, l: [
+      "Kabir wants to help, but the bags are bigger than him. Mooni peeks out of his pocket.",
+      "कबीर मदद करना चाहता है, पर बैग उससे भी बड़े हैं। मूनी उसकी जेब से झाँकती है।",
+      "Kabir madad karna chahta hai, par bag usse bhi bade hain. Mooni uski jeb se jhaankti hai."]},
+    {bg: "station", who: [0, 2, 1], glow: 1, l: [
+      "Mooni glows on the dark stairs so everyone can see the steps. Kabir and Mummy carry the bags together.",
+      "मूनी अँधेरी सीढ़ियों पर चमकती है ताकि सबको सीढ़ियाँ दिखें। कबीर और मम्मी मिलकर बैग उठाते हैं।",
+      "Mooni andheri seedhiyon par chamakti hai taaki sabko seedhiyaan dikhein. Kabir aur Mummy milkar bag uthate hain."]},
+    {bg: "station", who: [1, 0], l: [
+      "Dadi blesses Kabir and gives him a small laddu. The train whistles.",
+      "दादी कबीर को आशीर्वाद देती हैं और उसे एक छोटा लड्डू देती हैं। ट्रेन की सीटी बजती है।",
+      "Dadi Kabir ko aashirwaad deti hain aur use ek chhota laddu deti hain. Train ki seeti bajti hai."]}
+  ]
+},
+{
+  t: ["The Lost Kitten", "खोया हुआ बिल्ली का बच्चा", "Khoya Hua Billi Ka Bachcha"],
+  cast: [
+    {n: ["Ananya", "अनन्या"], k: "kid", c: "#f2c230"},
+    {n: ["Sharma Uncle", "शर्मा अंकल"], k: "adult", c: "#8d6a4f"},
+    {n: ["Kitten", "बिल्ली का बच्चा"], k: "cat", c: "#d9a066"}
+  ],
+  sc: [
+    {bg: "night", who: [0], l: [
+      "Late evening. Ananya hears a tiny meow near the closed shop.",
+      "देर शाम है। अनन्या को बंद दुकान के पास एक हल्की म्याऊँ सुनाई देती है।",
+      "Der shaam hai. Ananya ko band dukaan ke paas ek halki meow sunaai deti hai."]},
+    {bg: "night", who: [0, 2], l: [
+      "A kitten is shivering behind a box, too scared to come out.",
+      "एक बिल्ली का बच्चा डिब्बे के पीछे काँप रहा है और बाहर आने से डर रहा है।",
+      "Ek billi ka bachcha dibbe ke peeche kaanp raha hai aur bahar aane se dar raha hai."]},
+    {bg: "night", who: [0, 2, 1], dim: 1, l: [
+      "Sharma Uncle comes out of the shop with his keys and asks what happened.",
+      "शर्मा अंकल चाबियाँ लेकर दुकान से बाहर आते हैं और पूछते हैं कि क्या हुआ।",
+      "Sharma Uncle chaabiyaan lekar dukaan se bahar aate hain aur poochte hain ki kya hua."]},
+    {bg: "night", who: [0, 2, 1], glow: 1, l: [
+      "Mooni lights a gentle path, and the kitten walks out slowly into Ananya's hands.",
+      "मूनी एक नरम रोशनी का रास्ता बनाती है और बिल्ली का बच्चा धीरे धीरे अनन्या के हाथों में आ जाता है।",
+      "Mooni ek naram roshni ka rasta banati hai aur billi ka bachcha dheere dheere Ananya ke haathon mein aa jaata hai."]},
+    {bg: "night", who: [0, 2, 1], l: [
+      "Sharma Uncle brings a bowl of milk. Ananya promises to help find the kitten's home.",
+      "शर्मा अंकल दूध का कटोरा लाते हैं। अनन्या वादा करती है कि वह बिल्ली के बच्चे का घर ढूँढने में मदद करेगी।",
+      "Sharma Uncle doodh ka katora laate hain. Ananya vaada karti hai ki woh billi ke bachche ka ghar dhoondhne mein madad karegi."]}
+  ]
+},
+{
+  t: ["Birthday Surprise", "जन्मदिन का सरप्राइज़", "Birthday Surprise"],
+  cast: [
+    {n: ["Isha", "ईशा"], k: "kid", c: "#ee79a8"},
+    {n: ["Mummy", "मम्मी"], k: "adult", c: "#2fa6a0"},
+    {n: ["Papa", "पापा"], k: "adult", c: "#3d6fd1"},
+    {n: ["Rohan", "रोहन"], k: "kid", c: "#f08a32"}
+  ],
+  sc: [
+    {bg: "party", who: [0], l: [
+      "Isha thinks everyone has forgotten her birthday. She sits quietly at home.",
+      "ईशा को लगता है कि सब उसका जन्मदिन भूल गए हैं। वह चुपचाप घर पर बैठी है।",
+      "Isha ko lagta hai ki sab uska birthday bhool gaye hain. Woh chupchaap ghar par baithi hai."]},
+    {bg: "party", who: [0, 1, 2, 3], l: [
+      "Mummy and Papa whisper in the kitchen while Rohan sneaks in with a cake.",
+      "मम्मी और पापा रसोई में फुसफुसा रहे हैं और रोहन चुपके से केक लेकर आता है।",
+      "Mummy aur Papa rasoi mein phusphusa rahe hain aur Rohan chupke se cake lekar aata hai."]},
+    {bg: "party", who: [0, 1, 2, 3], dim: 1, l: [
+      "The lights go off. Everyone hides quietly and waits.",
+      "बत्ती बुझ जाती है। सब चुपचाप छुप जाते हैं और इंतज़ार करते हैं।",
+      "Batti bujh jaati hai. Sab chupchaap chhup jaate hain aur intezaar karte hain."]},
+    {bg: "party", who: [0, 1, 2, 3], glow: 1, l: [
+      "Mooni glows from Isha's pocket and lights the candles on the cake all by herself.",
+      "मूनी ईशा की जेब से चमकती है और केक की मोमबत्तियाँ अपने आप जला देती है।",
+      "Mooni Isha ki jeb se chamakti hai aur cake ki mombattiyaan apne aap jala deti hai."]},
+    {bg: "party", who: [0, 1, 2, 3], fl: 1, l: [
+      "Surprise! Isha laughs and makes a wish. Mooni's star tail twinkles.",
+      "सरप्राइज़! ईशा हँसती है और मन्नत माँगती है। मूनी की तारे जैसी पूँछ टिमटिमाती है।",
+      "Surprise! Isha hansti hai aur mannat maangti hai. Mooni ki taare jaisi poonchh timtimati hai."]}
+  ]
+}
+];
+
+let L = 0, epI = 0, raf = 0, busy = false;
+
+/* ---------- helpers ---------- */
+function rr(x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+function star(x, y, r, col) {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const a = -Math.PI / 2 + i * Math.PI / 5;
+    const rad = i % 2 ? r * 0.45 : r;
+    ctx.lineTo(x + Math.cos(a) * rad, y + Math.sin(a) * rad);
+  }
+  ctx.closePath();
+  ctx.fillStyle = col;
+  ctx.fill();
+}
+function wrap(text, maxW) {
+  const words = text.split(" ");
+  const lines = [];
+  let cur = "";
+  words.forEach(w => {
+    const test = cur ? cur + " " + w : w;
+    if (ctx.measureText(test).width > maxW && cur) { lines.push(cur); cur = w; }
+    else cur = test;
+  });
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+/* ---------- Mooni sprite ---------- */
+const sp = document.createElement("canvas");
+sp.width = sp.height = 120;
+(function () {
+  const c = sp.getContext("2d");
+  c.fillStyle = "#fff1cf";
+  c.beginPath(); c.arc(60, 60, 50, 0, Math.PI * 2); c.fill();
+  c.globalCompositeOperation = "destination-out";
+  c.beginPath(); c.arc(82, 48, 44, 0, Math.PI * 2); c.fill();
+  c.globalCompositeOperation = "source-over";
+  c.fillStyle = "#2a2140"; c.beginPath(); c.arc(25, 62, 5, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "#fff"; c.beginPath(); c.arc(26.5, 60, 1.6, 0, Math.PI * 2); c.fill();
+  c.fillStyle = "rgba(255,150,150,0.6)"; c.beginPath(); c.arc(24, 76, 4, 0, Math.PI * 2); c.fill();
+})();
+
+function mooni(x, y, size, glow, t) {
+  ctx.save();
+  ctx.shadowColor = "#ffd978";
+  ctx.shadowBlur = glow ? 45 + 12 * Math.sin(t * 4) : 14;
+  ctx.drawImage(sp, x - size / 2, y - size / 2, size, size);
+  ctx.restore();
+  star(x + size * 0.32, y + size * 0.34, size * 0.11 * (1 + 0.2 * Math.sin(t * 5)), glow ? "#ffd24d" : "#d9bf6a");
+}
+
+/* ---------- characters ---------- */
+function person(x, k, col, t, ph) {
+  const s = k === "kid" ? 0.8 : k === "elder" ? 0.95 : 1.1;
+  const bob = Math.sin(t * 3 + ph) * 2;
+  ctx.save();
+  ctx.translate(x, 470 + bob * 0.5);
+  ctx.fillStyle = "#3b3b4f";
+  ctx.fillRect(-12 * s, -18 * s, 9 * s, 18 * s);
+  ctx.fillRect(3 * s, -18 * s, 9 * s, 18 * s);
+  ctx.fillStyle = col;
+  rr(-20 * s, -82 * s, 40 * s, 68 * s, 12 * s); ctx.fill();
+  ctx.fillStyle = "#f2c9a0";
+  circle(0, -98 * s, 17 * s);
+  ctx.fillStyle = k === "elder" ? "#dcdcdc" : "#2a1b12";
+  ctx.beginPath(); ctx.arc(0, -102 * s, 17 * s, Math.PI, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "#222";
+  circle(-6 * s, -98 * s, 2 * s); circle(6 * s, -98 * s, 2 * s);
+  ctx.strokeStyle = "#a0522d"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, -93 * s, 6 * s, 0.15 * Math.PI, 0.85 * Math.PI); ctx.stroke();
+  ctx.restore();
+}
+function cat(x, col, t, ph) {
+  const bob = Math.sin(t * 4 + ph) * 1.5;
+  ctx.save();
+  ctx.translate(x, 470 + bob);
+  ctx.fillStyle = col;
+  ctx.beginPath(); ctx.ellipse(0, -16, 22, 14, 0, 0, Math.PI * 2); ctx.fill();
+  circle(20, -30, 12);
+  ctx.beginPath(); ctx.moveTo(12, -39); ctx.lineTo(15, -52); ctx.lineTo(21, -40); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(22, -40); ctx.lineTo(28, -52); ctx.lineTo(30, -38); ctx.fill();
+  ctx.strokeStyle = col; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(-20, -18); ctx.quadraticCurveTo(-38, -30 + Math.sin(t * 5) * 6, -30, -44); ctx.stroke();
+  ctx.fillStyle = "#222"; circle(17, -31, 1.8); circle(24, -31, 1.8);
+  ctx.restore();
+}
+function label(x, txt) {
+  ctx.font = 'bold 12px system-ui,"Noto Sans Devanagari",sans-serif';
+  ctx.textAlign = "center";
+  const w = ctx.measureText(txt).width + 14;
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  rr(x - w / 2, 478, w, 18, 9); ctx.fill();
+  ctx.fillStyle = "#fff";
+  ctx.fillText(txt, x, 491);
+}
+
+/* ---------- backgrounds ---------- */
+const BG = {
+  home: {a: "#ffd9a8", b: "#fff1d6", g: "#c9a36b"},
+  street: {a: "#8fd3f4", b: "#e3f4ff", g: "#8e8e9a"},
+  rain: {a: "#2e3a57", b: "#5a6a8c", g: "#3b4256"},
+  station: {a: "#a5b4d6", b: "#e4eaf7", g: "#7d8396"},
+  night: {a: "#0b1530", b: "#22386f", g: "#232a3d"},
+  party: {a: "#2b1b4a", b: "#5a3b86", g: "#6b4a3a"}
+};
+function drawBg(s, t) {
+  const c = BG[s.bg];
+  const gr = ctx.createLinearGradient(0, 0, 0, 470);
+  gr.addColorStop(0, c.a); gr.addColorStop(1, c.b);
+  ctx.fillStyle = gr; ctx.fillRect(-20, -20, 400, 490);
+  ctx.fillStyle = c.g; ctx.fillRect(-20, 470, 400, 200);
+
+  if (s.bg === "home") {
+    ctx.fillStyle = "#ffe08a"; circle(300, 70, 28);
+    ctx.fillStyle = "#f3c9a0"; ctx.fillRect(20, 170, 320, 300);
+    ctx.fillStyle = "#d98b5f";
+    ctx.beginPath(); ctx.moveTo(0, 170); ctx.lineTo(180, 90); ctx.lineTo(360, 170); ctx.fill();
+    ctx.fillStyle = "#bfe3ff"; ctx.fillRect(45, 230, 70, 70); ctx.fillRect(245, 230, 70, 70);
+    ctx.fillStyle = "#8a5a3c"; ctx.fillRect(150, 330, 60, 140);
+  } else if (s.bg === "street") {
+    ctx.fillStyle = "#d9c7b2"; ctx.fillRect(-20, 230, 400, 240);
+    ctx.fillStyle = "#9ec9e8";
+    for (let i = 0; i < 3; i++) ctx.fillRect(25 + i * 115, 260, 70, 80);
+    ctx.fillStyle = "#6a6a74"; ctx.fillRect(250, 476, 70, 8);
+    ctx.fillStyle = "#6fa35a";
+    ctx.beginPath(); ctx.ellipse(290, 474, 10, 5, 0.4, 0, Math.PI * 2); ctx.fill();
+    if (s.shine) star(270, 472, 7 + 2 * Math.sin(t * 6), "#fff6b0");
+  } else if (s.bg === "rain") {
+    ctx.fillStyle = "#3d4663"; ctx.fillRect(-20, 260, 400, 210);
+    ctx.fillStyle = "#8a5a3c"; ctx.fillRect(235, 410, 110, 36);
+    ctx.fillStyle = "#222"; circle(255, 452, 12); circle(325, 452, 12);
+    ctx.fillStyle = "#5b3d28"; ctx.fillRect(285, 340, 6, 70);
+    const on = !s.dim;
+    ctx.fillStyle = on ? "#ffd24d" : "#4a4a4a"; circle(288, 334, 12);
+    if (on) {
+      const lg = ctx.createRadialGradient(288, 334, 4, 288, 334, 110);
+      lg.addColorStop(0, "rgba(255,210,77,0.45)"); lg.addColorStop(1, "rgba(255,210,77,0)");
+      ctx.fillStyle = lg; ctx.fillRect(150, 230, 280, 230);
+    }
+  } else if (s.bg === "station") {
+    ctx.fillStyle = "#6b7186"; ctx.fillRect(50, 150, 30, 320); ctx.fillRect(280, 150, 30, 320);
+    ctx.fillStyle = "#2d4a8a"; rr(115, 160, 130, 36, 6); ctx.fill();
+    ctx.fillStyle = "#fff"; ctx.font = "bold 15px system-ui,sans-serif"; ctx.textAlign = "center";
+    ctx.fillText("STATION", 180, 184);
+    ctx.fillStyle = "#f2c94c"; ctx.fillRect(-20, 466, 400, 6);
+  } else if (s.bg === "night") {
+    ctx.fillStyle = "#fff";
+    for (let i = 0; i < 30; i++) {
+      ctx.globalAlpha = 0.4 + 0.4 * Math.sin(t * 2 + i);
+      ctx.fillRect((i * 83) % 360, (i * 47) % 200, 2, 2);
+    }
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = "#3a4560"; ctx.fillRect(10, 250, 210, 220);
+    ctx.strokeStyle = "#2b3550"; ctx.lineWidth = 3;
+    for (let i = 0; i < 10; i++) { ctx.beginPath(); ctx.moveTo(10, 262 + i * 21); ctx.lineTo(220, 262 + i * 21); ctx.stroke(); }
+    ctx.fillStyle = "#6b4a2a"; ctx.fillRect(240, 430, 50, 40);
+  } else if (s.bg === "party") {
+    const cols = ["#ff6b6b", "#ffd93d", "#6bcb77", "#4d96ff"];
+    for (let i = 0; i < 9; i++) {
+      ctx.fillStyle = cols[i % 4];
+      ctx.beginPath(); ctx.moveTo(i * 45, 110); ctx.lineTo(i * 45 + 45, 110); ctx.lineTo(i * 45 + 22, 150); ctx.fill();
+    }
+    ctx.fillStyle = "#8a5a3c"; ctx.fillRect(120, 430, 120, 40);
+    ctx.fillStyle = "#fff1f1"; ctx.fillRect(150, 405, 60, 26);
+    ctx.fillStyle = "#ff9eb5"; ctx.fillRect(150, 405, 60, 8);
+    for (let i = 0; i < 3; i++) {
+      ctx.fillStyle = "#fff"; ctx.fillRect(163 + i * 14, 392, 4, 13);
+      if (s.glow || s.fl) { ctx.fillStyle = "#ffb84d"; circle(165 + i * 14, 388, 4 + Math.sin(t * 8 + i)); }
+    }
+  }
+}
+
+/* ---------- scene and cards ---------- */
+const XS = {1: [150], 2: [110, 250], 3: [80, 180, 280], 4: [55, 140, 225, 310]};
+
+function drawScene(ep, i, tt, t) {
+  const s = ep.sc[i];
+  ctx.save();
+  const z = 1 + 0.04 * tt / SCENE;
+  ctx.translate(180, 320); ctx.scale(z, z); ctx.translate(-180, -320);
+  drawBg(s, t);
+  const xs = XS[s.who.length];
+  s.who.forEach((ci, k) => {
+    const p = ep.cast[ci];
+    if (p.k === "cat") cat(xs[k], p.c, t, k); else person(xs[k], p.k, p.c, t, k);
+    label(xs[k], p.n[L === 1 ? 1 : 0]);
+  });
+  if (s.bg === "rain") {
+    ctx.strokeStyle = "rgba(200,220,255,0.55)"; ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    for (let j = 0; j < 70; j++) {
+      const x = (j * 41) % 380 - 10, y = ((j * 67) + t * 420) % 700 - 30;
+      ctx.moveTo(x, y); ctx.lineTo(x - 4, y + 14);
+    }
+    ctx.stroke();
+  }
+  if (s.dim) { ctx.fillStyle = "rgba(0,0,0,0.42)"; ctx.fillRect(-20, -20, 400, 700); }
+  const mx = xs[0] + 32, my = 300 + Math.sin(t * 2) * 6;
+  if (s.glow) {
+    const lg = ctx.createRadialGradient(mx, my, 10, mx, my, 260);
+    lg.addColorStop(0, "rgba(255,225,140,0.55)"); lg.addColorStop(1, "rgba(255,225,140,0)");
+    ctx.fillStyle = lg; ctx.fillRect(-20, -20, 400, 700);
+  }
+  mooni(mx, my, s.glow ? 84 : 64, !!s.glow, t);
+  ctx.restore();
+
+  ctx.fillStyle = "rgba(8,14,36,0.6)"; rr(12, 12, 150, 28, 14); ctx.fill();
+  ctx.fillStyle = "#ffd978"; ctx.font = "bold 13px system-ui,sans-serif"; ctx.textAlign = "left";
+  ctx.fillText("🌙 Mooni · Ep " + (epI + 1), 24, 31);
+
+  subtitle(s.l[L], tt);
+}
+
+function subtitle(text, tt) {
+  ctx.font = 'bold 17px system-ui,"Noto Sans Devanagari",sans-serif';
+  const lines = wrap(text, 296);
+  const h = lines.length * 24 + 18, top = 622 - h;
+  ctx.globalAlpha = Math.min(1, tt / 0.5);
+  ctx.fillStyle = "rgba(8,14,36,0.8)"; rr(20, top, 320, h, 14); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.textAlign = "center";
+  lines.forEach((ln, k) => ctx.fillText(ln, 180, top + 26 + k * 24));
+  ctx.globalAlpha = 1;
+}
+
+function cardBg(t) {
+  const g = ctx.createLinearGradient(0, 0, 0, 640);
+  g.addColorStop(0, "#0b1530"); g.addColorStop(1, "#22386f");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, 360, 640);
+  ctx.fillStyle = "#fff";
+  for (let i = 0; i < 40; i++) {
+    ctx.globalAlpha = 0.4 + 0.4 * Math.sin(t * 2 + i);
+    ctx.fillRect((i * 83) % 360, (i * 131) % 520, 2, 2);
+  }
+  ctx.globalAlpha = 1;
+}
+function titleCard(ep, t) {
+  cardBg(t);
+  mooni(180, 250 + Math.sin(t * 2) * 8, 150, true, t);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#ffd978"; ctx.font = "bold 22px system-ui,sans-serif";
+  ctx.fillText("Episode " + (epI + 1), 180, 395);
+  ctx.fillStyle = "#f5efe0"; ctx.font = 'bold 30px system-ui,"Noto Sans Devanagari",sans-serif';
+  wrap(ep.t[L], 300).forEach((ln, k) => ctx.fillText(ln, 180, 442 + k * 38));
+  ctx.fillStyle = "#9fb0e0"; ctx.font = "16px system-ui,sans-serif";
+  ctx.fillText(LN[L], 180, 590);
+}
+function outroCard(t) {
+  cardBg(t);
+  mooni(180, 270, 130, true, t);
+  ctx.textAlign = "center"; ctx.fillStyle = "#f5efe0";
+  ctx.font = 'bold 22px system-ui,"Noto Sans Devanagari",sans-serif';
+  wrap(OUTRO_TXT[L], 300).forEach((ln, k) => ctx.fillText(ln, 180, 410 + k * 32));
+  ctx.fillStyle = "#ffd978"; ctx.font = "bold 18px system-ui,sans-serif";
+  ctx.fillText("🌙 Mooni", 180, 520);
+}
+
+function total() { return INTRO + EPS[epI].sc.length * SCENE + OUTRO; }
+
+function render(t) {
+  ctx.setTransform(R, 0, 0, R, 0, 0);
+  ctx.clearRect(0, 0, 360, 640);
+  const ep = EPS[epI], n = ep.sc.length;
+  if (t < INTRO) { titleCard(ep, t); return; }
+  const u = t - INTRO;
+  if (u >= n * SCENE) { outroCard(u - n * SCENE); return; }
+  const i = Math.floor(u / SCENE);
+  drawScene(ep, i, u - i * SCENE, t);
+}
+
+/* ---------- playback and recording ---------- */
+function setBusy(b) {
+  busy = b;
+  $("ep").disabled = b; $("play").disabled = b; $("rec").disabled = b;
+  document.querySelectorAll(".pill").forEach(p => (p.disabled = b));
+}
+
+function run(done) {
+  cancelAnimationFrame(raf);
+  const start = performance.now();
+  const step = now => {
+    const t = (now - start) / 1000;
+    if (t >= total()) { render(total() - 0.01); done && done(); return; }
+    render(t);
+    raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+
+function scheduleMusic(ac, dest, dur) {
+  const master = ac.createGain();
+  master.gain.value = 0.18;
+  master.connect(dest);
+  const scale = [523.25, 587.33, 659.25, 783.99, 880.0, 783.99, 659.25, 587.33];
+  const t0 = ac.currentTime + 0.1;
+  for (let i = 0; i * 0.55 < dur; i++) {
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sine"; o.frequency.value = scale[i % scale.length];
+    const st = t0 + i * 0.55;
+    g.gain.setValueAtTime(0.0001, st);
+    g.gain.linearRampToValueAtTime(1, st + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, st + 0.5);
+    o.connect(g); g.connect(master);
+    o.start(st); o.stop(st + 0.55);
+  }
+}
+
+$("play").onclick = () => {
+  setBusy(true);
+  $("status").textContent = "Playing...";
+  run(() => { setBusy(false); $("status").textContent = "Done."; });
+};
+
+$("rec").onclick = () => {
+  if (typeof MediaRecorder === "undefined" || !cv.captureStream) {
+    $("status").textContent = "This browser cannot record video. Please use Chrome.";
+    return;
+  }
+  $("result").innerHTML = "";
+  const stream = cv.captureStream(30);
+  let ac = null;
+  try {
+    ac = new (window.AudioContext || window.webkitAudioContext)();
+    const dest = ac.createMediaStreamDestination();
+    scheduleMusic(ac, dest, total());
+    dest.stream.getAudioTracks().forEach(tr => stream.addTrack(tr));
+  } catch (e) { ac = null; }
+
+  const types = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"];
+  const mime = types.find(m => MediaRecorder.isTypeSupported(m)) || "";
+  let rec;
+  try {
+    rec = new MediaRecorder(stream, mime ? {mimeType: mime, videoBitsPerSecond: 4000000} : undefined);
+  } catch (e) {
+    $("status").textContent = "Could not start recording on this device.";
+    return;
+  }
+  const chunks = [];
+  rec.ondataavailable = e => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop = () => {
+    const type = rec.mimeType || mime || "video/webm";
+    const blob = new Blob(chunks, {type});
+    const url = URL.createObjectURL(blob);
+    const ext = type.indexOf("mp4") >= 0 ? "mp4" : "webm";
+    const v = document.createElement("video");
+    v.src = url; v.controls = true; v.playsInline = true;
+    const a = document.createElement("a");
+    a.href = url; a.download = "mooni-episode-" + (epI + 1) + "-" + ["en", "hi", "hinglish"][L] + "." + ext;
+    a.className = "btn"; a.textContent = "⬇ Download video";
+    $("result").append(v, a);
+    $("status").textContent = "Your video is ready!";
+    if (ac) ac.close();
+    setBusy(false);
+  };
+  setBusy(true);
+  $("status").textContent = "Recording... keep this tab open (about " + Math.round(total()) + " seconds).";
+  rec.start();
+  run(() => { setTimeout(() => { if (rec.state !== "inactive") rec.stop(); }, 300); });
+};
+
+/* ---------- story text, language, episodes ---------- */
+function fallbackCopy(text, done) {
+  const t = document.createElement("textarea");
+  t.value = text; document.body.appendChild(t); t.select();
+  try { document.execCommand("copy"); } catch (e) {}
+  t.remove(); done();
+}
+function copyText(text, btn, label) {
+  const done = () => { btn.textContent = "Copied!"; setTimeout(() => (btn.textContent = label), 1200); };
+  if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+
+function showStory() {
+  const ep = EPS[epI], box = $("story");
+  box.innerHTML = "";
+  const head = document.createElement("div");
+  head.className = "card";
+  const h = document.createElement("h3");
+  h.textContent = "Episode " + (epI + 1) + ": " + ep.t[L];
+  const p = document.createElement("p");
+  p.textContent = ep.cast.map(c => c.n[L === 1 ? 1 : 0]).join(", ");
+  head.append(h, p);
+  box.appendChild(head);
+  ep.sc.forEach((s, i) => {
+    const c = document.createElement("div");
+    c.className = "card";
+    const hh = document.createElement("h3");
+    hh.textContent = "Scene " + (i + 1);
+    const pp = document.createElement("p");
+    pp.textContent = s.l[L];
+    c.append(hh, pp);
+    box.appendChild(c);
+  });
+}
+
+function buildEpOptions() {
+  const sel = $("ep");
+  sel.innerHTML = "";
+  EPS.forEach((e, i) => {
+    const o = document.createElement("option");
+    o.value = i; o.textContent = "Episode " + (i + 1) + ": " + e.t[L];
+    sel.appendChild(o);
+  });
+  sel.value = epI;
+}
+
+function refresh() {
+  buildEpOptions();
+  showStory();
+  $("result").innerHTML = "";
+  $("status").textContent = "";
+  render(1.5);
+}
+
+LN.forEach((name, i) => {
+  const b = document.createElement("button");
+  b.className = "pill" + (i === 0 ? " active" : "");
+  b.textContent = name;
+  b.onclick = () => {
+    if (busy) return;
+    L = i;
+    document.querySelectorAll(".pill").forEach((p, k) => p.classList.toggle("active", k === i));
+    refresh();
+  };
+  $("pills").appendChild(b);
+});
+
+$("ep").onchange = () => { epI = parseInt($("ep").value, 10); refresh(); };
+
+$("copyStory").onclick = e => {
+  const ep = EPS[epI];
+  const text = "Episode " + (epI + 1) + ": " + ep.t[L] + "\n\n" +
+    ep.sc.map((s, i) => "Scene " + (i + 1) + ": " + s.l[L]).join("\n\n");
+  copyText(text, e.target, "Copy story");
+};
+$("copyPrompts").onclick = e => {
+  const ep = EPS[epI];
+  const cast = ep.cast.ma

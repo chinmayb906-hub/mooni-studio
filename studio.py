@@ -1,176 +1,192 @@
+
 import os
 import json
 import time
 from google import genai
 from google.genai import types
 
-API_KEY = os.environ.get("GEMINI_API_KEY")
+API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError(
-        "GEMINI_API_KEY is missing. Add it in your repo: "
-        "Settings > Secrets and variables > Actions > New repository secret."
-    )
+    raise RuntimeError("Missing GEMINI_API_KEY repository secret.")
 
 client = genai.Client(api_key=API_KEY)
 
-# Tried in this order. If one is overloaded or unavailable, the next is used.
-MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
+MODELS = [
+    "gemini-3.8-flash",
+    "gemini-3.6-flash",
+    "gemini-3.5-flash-lite"
+]
 
-# Errors that retrying will not fix.
-PERMANENT_ERRORS = (
-    "404", "NOT_FOUND", "API_KEY_INVALID", "API key not valid",
-    "PERMISSION_DENIED", "401", "403",
-)
+MAX_SCENES = 4
 
 
 def clean_json(text):
     text = text.strip()
-
     if text.startswith("```"):
         text = text.split("\n", 1)[1]
         text = text.rsplit("```", 1)[0].strip()
-
     return text
 
 
-def parse_episode(text):
-    episode = json.loads(clean_json(text))
+def validate_episode(data):
+    if not isinstance(data, dict):
+        raise ValueError("Episode must be a JSON object.")
 
-    if not isinstance(episode, dict):
-        raise ValueError("Gemini did not return a JSON object.")
+    scenes = data.get("scenes")
 
-    scenes = episode.get("scenes")
+    if not isinstance(scenes, list) or not scenes:
+        raise ValueError("No scenes found.")
 
-    if not episode.get("title") or not isinstance(scenes, list) or not scenes:
-        raise ValueError("Generated episode is incomplete.")
+    data["scenes"] = scenes[:MAX_SCENES]
 
-    # Keep at most 6 scenes; accept fewer rather than failing the whole run.
-    episode["scenes"] = scenes[:6]
-
-    for number, scene in enumerate(episode["scenes"], 1):
-        scene["scene"] = number
+    for i, scene in enumerate(data["scenes"], 1):
+        scene["scene"] = i
+        scene.setdefault("visual", "Colorful Indian village")
+        scene.setdefault("stock_query", "Indian village nature")
         scene.setdefault("narration", "")
-        scene.setdefault("dialogue", "")
-        scene.setdefault("visual", "")
+        scene.setdefault("characters", [])
 
-    return episode
+        dialogue = scene.get("dialogue", [])
+
+        if isinstance(dialogue, str):
+            dialogue = [{
+                "speaker": "Narrator",
+                "text": dialogue
+            }]
+
+        if not isinstance(dialogue, list):
+            dialogue = []
+
+        scene["dialogue"] = dialogue
+
+        for line in dialogue:
+            if not isinstance(line, dict):
+                raise ValueError("Invalid dialogue format.")
+            line.setdefault("speaker", "Narrator")
+            line.setdefault("text", "")
+
+    data.setdefault("title", "Mooni Adventure")
+    data.setdefault("description", "A magical children's story.")
+
+    return data
 
 
-def generate_with_retry(prompt, model, attempts=4):
+def generate_story(prompt):
     last_error = None
 
-    for attempt in range(attempts):
-        try:
-            print(f"Trying {model}, attempt {attempt + 1}/{attempts}")
+    for model in MODELS:
+        for attempt in range(2):
+            try:
+                print(f"Trying {model}, attempt {attempt + 1}")
 
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json"
-                ),
-            )
+                response = client.models.generate_content(
+                    model=model,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.9
+                    )
+                )
 
-            if not response.text:
-                raise ValueError("Gemini returned empty text.")
+                if not response.text:
+                    raise ValueError("Empty response from Gemini.")
 
-            return parse_episode(response.text), None
+                return validate_episode(
+                    json.loads(clean_json(response.text))
+                )
 
-        except Exception as e:
-            last_error = e
-            print(f"Generation error ({type(e).__name__}): {e}")
+            except Exception as error:
+                last_error = error
+                print(f"Generation failed: {error}")
 
-            if any(code in str(e) for code in PERMANENT_ERRORS):
-                print("Retrying will not fix this error. Moving on.")
-                break
+                if attempt == 0:
+                    time.sleep(4)
 
-            if attempt < attempts - 1:
-                wait_time = 10 * (2 ** attempt)
-                print(f"Waiting {wait_time} seconds before retry...")
-                time.sleep(wait_time)
-
-    return None, last_error
+    raise RuntimeError(
+        f"All story generation attempts failed: {last_error}"
+    )
 
 
-def generate_episode():
-    with open("characters.json", "r", encoding="utf-8") as f:
+def main():
+    with open("characters.json", encoding="utf-8") as f:
         character_data = json.load(f)
 
     characters = character_data["characters"]
-    style = character_data["visual_style"]
 
     character_details = "\n".join(
-        f'{c["name"]}: {c["appearance"]}. Personality: {c["personality"]}'
+        f'{c["name"]}: {c["appearance"]}. '
+        f'Personality: {c["personality"]}'
         for c in characters
     )
 
     prompt = f"""
-Create an original, entertaining children's cartoon episode.
+Create an ORIGINAL high-quality children's cartoon episode.
 
-VISUAL STYLE:
-{style}
+STYLE:
+{character_data["visual_style"]}
 
-PERMANENT CHARACTERS:
+CHARACTERS:
 {character_details}
 
-STORY REQUIREMENTS:
-- Set the story in a colourful Indian village.
-- Use Golu, Tara, Moti and Dadi as recurring characters.
-- Keep their appearance and personalities consistent.
-- Create an original mixed story: magic, comedy, adventure,
-  friendship, education or moral lessons.
-- Make the story suitable for children.
-- Create exactly 6 scenes.
-- Include narration and character dialogue.
-- Write the narration and dialogue in simple Hindi (Devanagari script).
-- Write the "visual" descriptions in English.
-- Give every scene a "stock_query": two or three simple English words
-  that describe the scene for a stock video search
-  (for example: village children playing, grandmother cooking, puppy running).
-- Give the story a happy and meaningful ending.
+RULES:
+- Write the story in simple Hindi using Devanagari.
+- Use no more than 4 scenes.
+- Use at least 3 recurring characters.
+- Include a funny, magical or educational adventure.
+- Keep character appearances consistent.
+- Every scene must have English visual descriptions.
+- Every scene must have an English stock video search query.
+- Every scene must have Hindi narration.
+- Use separate speaker-labelled dialogue.
+- Allowed speaker names must match character names or Narrator.
+- Give a meaningful happy ending.
+- Avoid violence, frightening scenes or inappropriate content.
+- Make the story suitable for children aged 3 to 10.
+- Avoid copyrighted characters and existing story plots.
+- Keep narration short enough for a YouTube Short.
 
 Return valid JSON only:
+
 {{
-  "title": "Episode title",
-  "description": "Short description",
+  "title": "Story title",
+  "description": "Short story description",
   "scenes": [
     {{
       "scene": 1,
       "characters": ["Golu", "Tara"],
-      "visual": "Detailed English visual description including character appearances and village setting",
+      "visual": "Detailed English visual description",
       "stock_query": "village children playing",
-      "narration": "Narration text in Hindi",
-      "dialogue": "Character dialogue in Hindi"
+      "narration": "Hindi narration",
+      "dialogue": [
+        {{
+          "speaker": "Golu",
+          "text": "Hindi dialogue"
+        }},
+        {{
+          "speaker": "Tara",
+          "text": "Hindi dialogue"
+        }}
+      ]
     }}
   ]
 }}
 """
 
-    episode = None
-    last_error = None
-
-    for model in MODELS:
-        episode, error = generate_with_retry(prompt, model)
-
-        if episode is not None:
-            break
-
-        last_error = error
-        print(f"{model} did not work. Trying the next model...")
-
-    if episode is None:
-        raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
+    episode = generate_story(prompt)
 
     os.makedirs("output", exist_ok=True)
 
-    with open("output/episode.json", "w", encoding="utf-8") as f:
+    with open(
+        "output/episode.json",
+        "w",
+        encoding="utf-8"
+    ) as f:
         json.dump(episode, f, ensure_ascii=False, indent=2)
 
-    print("Mooni Studio story generated successfully!")
-    print("Title:", episode["title"])
+    print("Episode generated:", episode["title"])
     print("Scenes:", len(episode["scenes"]))
 
 
 if __name__ == "__main__":
-    generate_episode()
+    main()

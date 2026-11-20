@@ -1,30 +1,60 @@
 
 {
-  "visual_style": "Original high-quality 3D Indian village cartoon animation, colourful cinematic lighting, child-friendly characters, expressive faces, consistent character designs",
+  "visual_style": "Original colorful cinematic 3D cartoon for children, Indian village environment, expressive faces, warm lighting, consistent character designs, family friendly, high quality animation style",
   "characters": [
     {
       "name": "Golu",
       "age": 8,
-      "appearance": "Indian village boy, blue kurta, brown shorts, short black hair, big expressive brown eyes",
+      "appearance": "Indian village boy with round cheerful face, short black hair, blue kurta and brown shorts, big expressive brown eyes",
       "personality": "Curious, brave, playful"
     },
     {
       "name": "Tara",
       "age": 8,
-      "appearance": "Indian village girl, yellow dress, two black braids, big expressive brown eyes",
+      "appearance": "Indian village girl with two black braids, yellow dress, expressive brown eyes and friendly smile",
       "personality": "Clever, kind, adventurous"
     },
     {
       "name": "Moti",
       "age": 2,
-      "appearance": "Cute fluffy white and brown puppy, floppy ears, big friendly eyes",
+      "appearance": "Cute fluffy white and brown puppy, floppy ears, round eyes and a red collar",
       "personality": "Playful, loyal, funny"
     },
     {
       "name": "Dadi",
       "age": 65,
-      "appearance": "Kind Indian grandmother, green sari, silver hair in a bun, warm smile",
+      "appearance": "Kind Indian grandmother with silver hair in a bun, green sari and warm smile",
       "personality": "Wise, loving, magical storyteller"
+    },
+    {
+      "name": "Aarav",
+      "age": 10,
+      "appearance": "Indian village boy with wavy black hair, green jacket, orange shirt and tan trousers",
+      "personality": "Energetic, creative, friendly"
+    },
+    {
+      "name": "Meera",
+      "age": 10,
+      "appearance": "Indian village girl with shoulder length black hair, yellow hairband, purple kurti and turquoise leggings",
+      "personality": "Smart, courageous, caring"
+    },
+    {
+      "name": "Chiku",
+      "age": 2,
+      "appearance": "Cute orange baby fox with cream muzzle, fluffy cream tail tip and blue neckerchief",
+      "personality": "Mischievous, curious, affectionate"
+    },
+    {
+      "name": "Bholu",
+      "age": 3,
+      "appearance": "Friendly green parrot with bright feathers, yellow beak and tiny yellow satchel",
+      "personality": "Funny, talkative, helpful"
+    },
+    {
+      "name": "Uncle Bhola",
+      "age": 45,
+      "appearance": "Friendly Indian village uncle with moustache, round spectacles, sky blue kurta, cream waistcoat and sandals",
+      "personality": "Helpful, humorous, wise"
     }
   ]
 }

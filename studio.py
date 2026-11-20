@@ -10,37 +10,59 @@ if not API_KEY:
 
 client = genai.Client(api_key=API_KEY)
 
-PROMPT = """
-Create an original 60-second cartoon episode for children.
+def generate_episode():
+    with open("characters.json", "r", encoding="utf-8") as f:
+        character_data = json.load(f)
 
-Requirements:
-- Create an original and entertaining story.
-- Use friendly characters.
-- Include six scenes.
-- Include visual descriptions.
-- Include narration.
-- Include character dialogue.
-- Give the story a happy ending.
+    characters = character_data["characters"]
+    style = character_data["visual_style"]
+
+    character_details = "\n".join(
+        f'{c["name"]}: {c["appearance"]}. Personality: {c["personality"]}'
+        for c in characters
+    )
+
+    prompt = f"""
+Create an original, entertaining children's cartoon episode.
+
+VISUAL STYLE:
+{style}
+
+PERMANENT CHARACTERS:
+{character_details}
+
+STORY REQUIREMENTS:
+- Set the story in a colourful Indian village.
+- Use Golu, Tara, Moti and Dadi as recurring characters.
+- Keep their appearance and personalities consistent.
+- Create an original mixed story: magic, comedy, adventure,
+  friendship, education or moral lessons.
+- Make the story suitable for children.
+- Include exactly 6 scenes.
+- Include narration and character dialogue.
+- Write the story in simple Hindi.
+- Make every scene visually descriptive.
+- Give the story a happy and meaningful ending.
 
 Return valid JSON only:
-{
+{{
   "title": "Episode title",
   "description": "Short description",
   "scenes": [
-    {
+    {{
       "scene": 1,
-      "visual": "Scene description",
+      "characters": ["Golu", "Tara"],
+      "visual": "Detailed visual description including character appearances and village setting",
       "narration": "Narration text",
       "dialogue": "Character dialogue"
-    }
+    }}
   ]
-}
+}}
 """
 
-def generate_episode():
     response = client.models.generate_content(
         model="gemini-3.8-flash",
-        contents=PROMPT
+        contents=prompt
     )
 
     result = response.text.strip()
@@ -56,10 +78,10 @@ def generate_episode():
 
     os.makedirs("output", exist_ok=True)
 
-    with open("output/episode.json", "w", encoding="utf-8") as file:
-        json.dump(episode, file, ensure_ascii=False, indent=2)
+    with open("output/episode.json", "w", encoding="utf-8") as f:
+        json.dump(episode, f, ensure_ascii=False, indent=2)
 
-    print("Episode generated successfully!")
+    print("Mooni Studio story generated!")
     print("Title:", episode["title"])
     print("Scenes:", len(episode["scenes"]))
 

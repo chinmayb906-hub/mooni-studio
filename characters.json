@@ -1,0 +1,30 @@
+
+{
+  "visual_style": "Original high-quality 3D Indian village cartoon animation, colourful cinematic lighting, child-friendly characters, expressive faces, consistent character designs",
+  "characters": [
+    {
+      "name": "Golu",
+      "age": 8,
+      "appearance": "Indian village boy, blue kurta, brown shorts, short black hair, big expressive brown eyes",
+      "personality": "Curious, brave, playful"
+    },
+    {
+      "name": "Tara",
+      "age": 8,
+      "appearance": "Indian village girl, yellow dress, two black braids, big expressive brown eyes",
+      "personality": "Clever, kind, adventurous"
+    },
+    {
+      "name": "Moti",
+      "age": 2,
+      "appearance": "Cute fluffy white and brown puppy, floppy ears, big friendly eyes",
+      "personality": "Playful, loyal, funny"
+    },
+    {
+      "name": "Dadi",
+      "age": 65,
+      "appearance": "Kind Indian grandmother, green sari, silver hair in a bun, warm smile",
+      "personality": "Wise, loving, magical storyteller"
+    }
+  ]
+}

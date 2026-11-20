@@ -121,10 +121,10 @@ def main():
         make_voice(text, voice_path)
 
         original = f"output/clips/scene_{i:02d}.mp4"
-animated_3d = f"output/3dclips/scene_{i:02d}.mp4"
+        animated_3d = f"output/3dclips/scene_{i:02d}.mp4"
 
-if os.path.exists(animated_3d):
-    original = animated_3d
+        if os.path.exists(animated_3d):
+            original = animated_3d
 
         source = original if os.path.exists(original) else None
 

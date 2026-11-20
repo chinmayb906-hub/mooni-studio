@@ -1,46 +1,27 @@
-
 import os
 import json
 import time
 from google import genai
+from google.genai import types
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
 
 if not API_KEY:
-    raise RuntimeError("GEMINI_API_KEY is missing.")
+    raise RuntimeError(
+        "GEMINI_API_KEY is missing. Add it in your repo: "
+        "Settings > Secrets and variables > Actions > New repository secret."
+    )
 
 client = genai.Client(api_key=API_KEY)
 
-PRIMARY_MODEL = "gemini-3.8-flash"
-BACKUP_MODEL = "gemini-2.5-flash"
+# Tried in this order. If one is overloaded or unavailable, the next is used.
+MODELS = ["gemini-3.8-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"]
 
-
-def generate_with_retry(prompt, model, attempts=5):
-    for attempt in range(attempts):
-        try:
-            print(f"Trying {model}, attempt {attempt + 1}/{attempts}")
-
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt
-            )
-
-            if not response.text:
-                raise ValueError("Gemini returned empty text.")
-
-            return response.text.strip()
-
-        except Exception as e:
-            print(f"Generation error: {e}")
-
-            if attempt < attempts - 1:
-                wait_time = 15 * (2 ** attempt)
-                print(f"Waiting {wait_time} seconds before retry...")
-                time.sleep(wait_time)
-            else:
-                print(f"{model} failed after {attempts} attempts.")
-
-    return None
+# Errors that retrying will not fix.
+PERMANENT_ERRORS = (
+    "404", "NOT_FOUND", "API_KEY_INVALID", "API key not valid",
+    "PERMISSION_DENIED", "401", "403",
+)
 
 
 def clean_json(text):
@@ -51,6 +32,65 @@ def clean_json(text):
         text = text.rsplit("```", 1)[0].strip()
 
     return text
+
+
+def parse_episode(text):
+    episode = json.loads(clean_json(text))
+
+    if not isinstance(episode, dict):
+        raise ValueError("Gemini did not return a JSON object.")
+
+    scenes = episode.get("scenes")
+
+    if not episode.get("title") or not isinstance(scenes, list) or not scenes:
+        raise ValueError("Generated episode is incomplete.")
+
+    # Keep at most 6 scenes; accept fewer rather than failing the whole run.
+    episode["scenes"] = scenes[:6]
+
+    for number, scene in enumerate(episode["scenes"], 1):
+        scene["scene"] = number
+        scene.setdefault("narration", "")
+        scene.setdefault("dialogue", "")
+        scene.setdefault("visual", "")
+
+    return episode
+
+
+def generate_with_retry(prompt, model, attempts=4):
+    last_error = None
+
+    for attempt in range(attempts):
+        try:
+            print(f"Trying {model}, attempt {attempt + 1}/{attempts}")
+
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json"
+                ),
+            )
+
+            if not response.text:
+                raise ValueError("Gemini returned empty text.")
+
+            return parse_episode(response.text), None
+
+        except Exception as e:
+            last_error = e
+            print(f"Generation error ({type(e).__name__}): {e}")
+
+            if any(code in str(e) for code in PERMANENT_ERRORS):
+                print("Retrying will not fix this error. Moving on.")
+                break
+
+            if attempt < attempts - 1:
+                wait_time = 10 * (2 ** attempt)
+                print(f"Waiting {wait_time} seconds before retry...")
+                time.sleep(wait_time)
+
+    return None, last_error
 
 
 def generate_episode():
@@ -83,8 +123,11 @@ STORY REQUIREMENTS:
 - Make the story suitable for children.
 - Create exactly 6 scenes.
 - Include narration and character dialogue.
-- Write the story in simple Hindi.
-- Make every scene visually descriptive.
+- Write the narration and dialogue in simple Hindi (Devanagari script).
+- Write the "visual" descriptions in English.
+- Give every scene a "stock_query": two or three simple English words
+  that describe the scene for a stock video search
+  (for example: village children playing, grandmother cooking, puppy running).
 - Give the story a happy and meaningful ending.
 
 Return valid JSON only:
@@ -95,30 +138,29 @@ Return valid JSON only:
     {{
       "scene": 1,
       "characters": ["Golu", "Tara"],
-      "visual": "Detailed visual description including character appearances and village setting",
-      "narration": "Narration text",
-      "dialogue": "Character dialogue"
+      "visual": "Detailed English visual description including character appearances and village setting",
+      "stock_query": "village children playing",
+      "narration": "Narration text in Hindi",
+      "dialogue": "Character dialogue in Hindi"
     }}
   ]
 }}
 """
 
-    result = generate_with_retry(prompt, PRIMARY_MODEL)
+    episode = None
+    last_error = None
 
-    if result is None:
-        print("Primary model failed. Trying backup model...")
-        result = generate_with_retry(prompt, BACKUP_MODEL, attempts=3)
+    for model in MODELS:
+        episode, error = generate_with_retry(prompt, model)
 
-    if result is None:
-        raise RuntimeError("Both Gemini models failed. Please try again later.")
+        if episode is not None:
+            break
 
-    episode = json.loads(clean_json(result))
+        last_error = error
+        print(f"{model} did not work. Trying the next model...")
 
-    if not episode.get("title") or not episode.get("scenes"):
-        raise ValueError("Generated episode is incomplete.")
-
-    if len(episode["scenes"]) != 6:
-        raise ValueError("Episode must contain exactly 6 scenes.")
+    if episode is None:
+        raise RuntimeError(f"All Gemini models failed. Last error: {last_error}")
 
     os.makedirs("output", exist_ok=True)
 

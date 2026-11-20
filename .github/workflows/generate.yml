@@ -1,4 +1,3 @@
-
 name: Mooni Studio Episode Generator
 
 on:
@@ -33,14 +32,15 @@ jobs:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
         run: python pixabay.py
 
-      - name: Save episode
-        uses: actions/upload-artifact@v4
-        with:
-          name: mooni-studio-episode
-          path: output/episode.json
+      - name: Render complete video
+        run: python render_video.py
 
-      - name: Save downloaded video clips
+      - name: Save episode and video
         uses: actions/upload-artifact@v4
         with:
-          name: mooni-video-clips
-          path: output/clips/
+          name: mooni-studio-output
+          path: |
+            output/episode.json
+            output/mooni_episode.mp4
+            output/clips/
+            output/voice/

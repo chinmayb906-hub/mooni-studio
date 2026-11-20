@@ -30,10 +30,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Install FFmpeg
+      
+      - name: Install FFmpeg and Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg
+          sudo apt-get install -y ffmpeg blender
+
 
       - name: Verify API keys
         env:
@@ -61,6 +63,11 @@ jobs:
         env:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
         run: python pixabay.py
+        
+      - name: Generate procedural 3D scenes
+        run: |
+          blender -b -t 2 --python blender_animation.py
+
 
       - name: Render vertical episode
         run: python render_video.py

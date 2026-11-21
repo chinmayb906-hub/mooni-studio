@@ -559,7 +559,7 @@ class BlenderScriptDryRun(unittest.TestCase):
                     ],
                 },
                 {
-                    "characters": ["Moti", "Chiku", "Dadi", "Uncle Bhola"],
+                    "characters": ["Moti", "Chiku", "Dadi"],
                     "narration": "",
                     "dialogue": [
                         {"speaker": "Dadi", "text": "बच्चो खाना खा लो"},

@@ -372,7 +372,55 @@ def main():
                 f"No characters assigned to scene {i}"
             )
 
+        
+        character_colors = [
+            BLUE,
+            YELLOW,
+            PURPLE
+        ]
+
         for j, name in enumerate(names[:3]):
+            original_name = str(name).strip()
+            name = original_name.lower()
+            x = positions[j]
+            color = character_colors[j]
+
+            if name == "golu":
+                person("Golu", x, BLUE, timing)
+
+            elif name == "tara":
+                person("Tara", x, YELLOW, timing)
+
+            elif name == "moti":
+                dog("Moti", x, timing)
+
+            elif name == "dadi":
+                person("Dadi", x, PURPLE, timing)
+
+            elif name == "aarav":
+                person("Aarav", x, GREEN, timing)
+
+            elif name == "meera":
+                person("Meera", x, CYAN, timing)
+
+            elif name == "chiku":
+                dog("Chiku", x, timing)
+
+            elif name == "bholu":
+                bird("Bholu", x, timing)
+
+            elif name in ("uncle bhola", "unclebhola"):
+                person("UncleBhola", x, BLUE, timing)
+
+            else:
+                safe_name = "ExtraCharacter" + str(j + 1)
+                print(
+                    "Unknown character name:",
+                    original_name,
+                    "- creating fallback character"
+                )
+                person(safe_name, x, color, timing)
+
             name = str(name).lower()
             x = positions[j]
 

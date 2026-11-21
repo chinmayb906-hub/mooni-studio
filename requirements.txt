@@ -1,5 +1,3 @@
-
 google-genai
 requests
 gTTS
-Pillow

@@ -1,12 +1,15 @@
 
 import os
 import json
+import math
 import subprocess
+import wave
+import struct
+import sys
+
 from gtts import gTTS
 
-WIDTH = 720
-HEIGHT = 1280
-FPS = 24
+FPS = 12
 
 
 def run(command):
@@ -14,11 +17,10 @@ def run(command):
         command,
         capture_output=True,
         text=True,
-        timeout=180
+        timeout=240
     )
-
     if result.returncode != 0:
-        raise RuntimeError(result.stderr[-1500:])
+        raise RuntimeError(result.stderr[-2000:])
 
 
 def make_voice(text, path):
@@ -28,12 +30,90 @@ def make_voice(text, path):
     gTTS(text=text, lang="hi").save(path)
 
 
+def create_timing(audio_path, json_path, wav_path):
+    run([
+        "ffmpeg", "-y",
+        "-i", audio_path,
+        "-ac", "1",
+        "-ar", "12000",
+        wav_path
+    ])
+
+    values = []
+
+    with wave.open(wav_path, "rb") as audio:
+        rate = audio.getframerate()
+        width = audio.getsampwidth()
+        frames = audio.getnframes()
+        raw = audio.readframes(frames)
+
+    if width != 2:
+        raise RuntimeError("Expected 16-bit audio.")
+
+    samples = struct.unpack("<" + "h" * (len(raw) // 2), raw)
+
+    chunk = max(1, rate // FPS)
+
+    for start in range(0, len(samples), chunk):
+        block = samples[start:start + chunk]
+
+        if not block:
+            continue
+
+        rms = math.sqrt(
+            sum(s * s for s in block) / len(block)
+        )
+
+        normalized = min(1.0, rms / 7000.0)
+        values.append(round(normalized, 3))
+
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(values, f)
+
+
+def generate_voices():
+    with open("output/episode.json", encoding="utf-8") as f:
+        episode = json.load(f)
+
+    os.makedirs("output/voice", exist_ok=True)
+
+    for i, scene in enumerate(episode["scenes"], 1):
+        text_parts = []
+
+        narration = scene.get("narration", "")
+        if narration:
+            text_parts.append(narration)
+
+        for line in scene.get("dialogue", []):
+            if isinstance(line, dict):
+                spoken = line.get("text", "")
+                if spoken:
+                    text_parts.append(spoken)
+
+        text = " ".join(text_parts)
+
+        audio_path = f"output/voice/scene_{i:02d}.mp3"
+        wav_path = f"output/voice/scene_{i:02d}.wav"
+        timing_path = f"output/voice/scene_{i:02d}.json"
+
+        print("Generating voice:", i)
+
+        make_voice(text, audio_path)
+
+        create_timing(
+            audio_path,
+            timing_path,
+            wav_path
+        )
+
+    print("VOICE AND TIMING DATA READY")
+
+
 def render_scene(video_path, audio_path, output_path):
-    audio_duration = float(
+    duration = float(
         subprocess.check_output(
             [
-                "ffprobe",
-                "-v", "error",
+                "ffprobe", "-v", "error",
                 "-show_entries", "format=duration",
                 "-of", "default=noprint_wrappers=1:nokey=1",
                 audio_path
@@ -49,13 +129,13 @@ def render_scene(video_path, audio_path, output_path):
         "fps=24"
     )
 
-    if video_path and os.path.exists(video_path):
+    if os.path.exists(video_path):
         command = [
             "ffmpeg", "-y",
             "-stream_loop", "-1",
             "-i", video_path,
             "-i", audio_path,
-            "-t", str(audio_duration),
+            "-t", str(duration),
             "-vf", filters,
             "-map", "0:v:0",
             "-map", "1:a:0",
@@ -74,7 +154,7 @@ def render_scene(video_path, audio_path, output_path):
             "-f", "lavfi",
             "-i", "color=c=0x182447:s=720x1280:r=24",
             "-i", audio_path,
-            "-t", str(audio_duration),
+            "-t", str(duration),
             "-map", "0:v:0",
             "-map", "1:a:0",
             "-c:v", "libx264",
@@ -89,61 +169,32 @@ def render_scene(video_path, audio_path, output_path):
     run(command)
 
 
-def main():
+def finalize_video():
     with open("output/episode.json", encoding="utf-8") as f:
         episode = json.load(f)
 
-    os.makedirs("output/voice", exist_ok=True)
     os.makedirs("output/scenes", exist_ok=True)
 
     rendered = []
 
     for i, scene in enumerate(episode["scenes"], 1):
-        print(f"Rendering scene {i}")
+        print("Finalizing scene:", i)
 
-        text_parts = []
-
-        narration = scene.get("narration", "")
-        if narration:
-            text_parts.append(narration)
-
-        for line in scene.get("dialogue", []):
-            if isinstance(line, dict):
-                spoken = line.get("text", "")
-                if spoken:
-                    text_parts.append(spoken)
-
-        text = " ".join(text_parts)
-
-        voice_path = f"output/voice/scene_{i:02d}.mp3"
+        audio_path = f"output/voice/scene_{i:02d}.mp3"
+        video_path = f"output/3dclips/scene_{i:02d}.mp4"
         scene_path = f"output/scenes/scene_{i:02d}.mp4"
 
-        make_voice(text, voice_path)
-
-        original = f"output/clips/scene_{i:02d}.mp4"
-        animated_3d = f"output/3dclips/scene_{i:02d}.mp4"
-
-        if os.path.exists(animated_3d):
-            original = animated_3d
-
-        source = original if os.path.exists(original) else None
-
         render_scene(
-            source,
-            voice_path,
+            video_path,
+            audio_path,
             scene_path
         )
 
         rendered.append(scene_path)
 
-    if not rendered:
-        raise RuntimeError("No scenes were rendered.")
-
     with open("output/concat.txt", "w", encoding="utf-8") as f:
         for path in rendered:
-            f.write(
-                "file '" + os.path.abspath(path) + "'\n"
-            )
+            f.write("file '" + os.path.abspath(path) + "'\n")
 
     run([
         "ffmpeg", "-y",
@@ -160,4 +211,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    mode = sys.argv[1] if len(sys.argv) > 1 else ""
+
+    if mode == "voice":
+        generate_voices()
+    elif mode == "final":
+        finalize_video()
+    else:
+        raise RuntimeError(
+            "Use voice or final mode."
+        )

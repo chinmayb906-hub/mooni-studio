@@ -627,11 +627,42 @@ def setup(n_frames):
         light.name = name
         light.data.energy = strength
         light.rotation_euler = rotation
-
-
+    
 def check_visible(path):
     """Verify the diagnostic still contains visibly lit characters."""
-    import numpy
+    from array import array
+
+    image = bpy.data.images.load(path, check_existing=False)
+
+    try:
+        width, height = image.size
+        buffer = array("f", [0.0]) * (width * height * 4)
+        image.pixels.foreach_get(buffer)
+    finally:
+        bpy.data.images.remove(image)
+
+    visible_pixels = 0
+    brightness_total = 0.0
+    pixel_count = width * height
+
+    for i in range(0, len(buffer), 4):
+        red = buffer[i]
+        green = buffer[i + 1]
+        blue = buffer[i + 2]
+        alpha = buffer[i + 3]
+
+        if alpha > 0.05:
+            visible_pixels += 1
+            brightness_total += (red + green + blue) / 3.0
+
+    coverage = visible_pixels / pixel_count if pixel_count else 0.0
+
+    if visible_pixels == 0:
+        return 0.0, 0.0
+
+    brightness = brightness_total / visible_pixels
+    return coverage, brightness
+
 
     image = bpy.data.images.load(path, check_existing=False)
 

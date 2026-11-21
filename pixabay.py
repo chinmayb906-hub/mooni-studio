@@ -1,28 +1,51 @@
-import os
+"""Download one Pixabay background clip per scene.
+
+The clips are used as backgrounds behind the 3D characters. If no clip can be
+found for a scene, render_video.py falls back to a plain sky-and-grass
+background, so a missing clip never stops an episode. A wrong API key does
+stop the run, because every scene would be affected.
+"""
+
 import json
+import os
 import re
 import time
+
 import requests
-
-API_KEY = os.environ.get("PIXABAY_API_KEY")
-
-if not API_KEY:
-    raise RuntimeError(
-        "PIXABAY_API_KEY is missing. Add it in your repo: "
-        "Settings > Secrets and variables > Actions > New repository secret."
-    )
 
 API_URL = "https://pixabay.com/api/videos/"
 
-# Used when a scene's own search words find nothing.
-FALLBACK_QUERIES = ["village life", "children playing", "nature", "garden"]
+OUTPUT_DIR = "output"
 
+# Used when a scene's own search words find nothing.
+FALLBACK_QUERIES = ["village life", "nature", "garden", "countryside"]
 
 # Pixabay sometimes answers 503 or 429 for a moment. Wait and try again.
 RETRY_STATUS = {429, 500, 502, 503, 504}
 
+# Status codes that mean the API key (or request) itself is wrong.
+AUTH_STATUS = {400, 401, 403}
 
-def get_with_retry(url, params=None, timeout=30, attempts=5):
+MIN_CLIP_BYTES = 10000
+
+
+class PixabayAuthError(RuntimeError):
+    """The API key was rejected."""
+
+
+def get_api_key():
+    key = os.environ.get("PIXABAY_API_KEY")
+
+    if not key:
+        raise RuntimeError(
+            "PIXABAY_API_KEY is missing. Add it in your repo: "
+            "Settings > Secrets and variables > Actions > New repository secret."
+        )
+
+    return key
+
+
+def get_with_retry(url, params=None, timeout=30, attempts=5, api=False):
     last_error = None
 
     for attempt in range(attempts):
@@ -31,6 +54,12 @@ def get_with_retry(url, params=None, timeout=30, attempts=5):
         except (requests.ConnectionError, requests.Timeout) as error:
             last_error = error
         else:
+            if api and response.status_code in AUTH_STATUS:
+                raise PixabayAuthError(
+                    f"Pixabay rejected the request ({response.status_code}). "
+                    "Check that PIXABAY_API_KEY is correct."
+                )
+
             if response.status_code not in RETRY_STATUS:
                 response.raise_for_status()
                 return response
@@ -71,16 +100,17 @@ def build_queries(scene):
     return unique
 
 
-def search_videos(query):
+def search_videos(query, api_key):
     response = get_with_retry(
         API_URL,
         params={
-            "key": API_KEY,
+            "key": api_key,
             "q": query,
             "per_page": 10,
             "safesearch": "true",
         },
         timeout=30,
+        api=True,
     )
     return response.json().get("hits", [])
 
@@ -94,26 +124,33 @@ def pick_url(hit):
     return None
 
 
+def prefer_long_clips(hits):
+    """Longer clips loop less noticeably; keep Pixabay's order otherwise."""
+    return sorted(hits, key=lambda hit: (hit.get("duration") or 0) < 5)
+
+
 def main():
-    with open("output/episode.json", "r", encoding="utf-8") as file:
+    api_key = get_api_key()
+
+    with open(OUTPUT_DIR + "/episode.json", "r", encoding="utf-8") as file:
         episode = json.load(file)
 
-    os.makedirs("output/clips", exist_ok=True)
+    os.makedirs(OUTPUT_DIR + "/clips", exist_ok=True)
     downloaded = 0
     used_urls = set()
 
     for index, scene in enumerate(episode.get("scenes", []), 1):
-        path = f"output/clips/scene_{index:02d}.mp4"
+        path = f"{OUTPUT_DIR}/clips/scene_{index:02d}.mp4"
         saved = False
 
         for query in build_queries(scene):
             try:
-                hits = search_videos(query)
+                hits = search_videos(query, api_key)
             except requests.RequestException as error:
                 print(f"Scene {index}: search failed for '{query}': {error}")
                 continue
 
-            for hit in hits:
+            for hit in prefer_long_clips(hits):
                 url = pick_url(hit)
 
                 if not url or url in used_urls:
@@ -123,6 +160,10 @@ def main():
                     clip = get_with_retry(url, timeout=90)
                 except requests.RequestException as error:
                     print(f"Scene {index}: download failed: {error}")
+                    continue
+
+                if len(clip.content) < MIN_CLIP_BYTES:
+                    print(f"Scene {index}: clip too small, skipping.")
                     continue
 
                 with open(path, "wb") as file:
@@ -138,14 +179,12 @@ def main():
                 break
 
         if not saved:
-            print(f"Scene {index}: no clip found, a plain background will be used.")
+            print(
+                f"Scene {index}: no clip found, "
+                "a plain background will be used."
+            )
 
-    if downloaded == 0:
-        raise RuntimeError(
-            "No Pixabay clips were downloaded. Check that PIXABAY_API_KEY is correct."
-        )
-
-    print(f"Downloaded {downloaded} clips successfully.")
+    print(f"Downloaded {downloaded} clips.")
 
 
 if __name__ == "__main__":

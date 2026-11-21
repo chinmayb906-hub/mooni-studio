@@ -53,7 +53,10 @@ def cylinder(name, loc, radius, depth, color):
 def setup(frame_end):
     scene = bpy.context.scene
 
-    available = [e.identifier for e in scene.render.bl_rna.properties["engine"].enum_items]
+    available = [
+        e.identifier
+        for e in scene.render.bl_rna.properties["engine"].enum_items
+    ]
 
     if "BLENDER_EEVEE_NEXT" in available:
         scene.render.engine = "BLENDER_EEVEE_NEXT"
@@ -77,6 +80,7 @@ def setup(frame_end):
     world = bpy.data.worlds.new("MooniWorld")
     scene.world = world
     world.use_nodes = True
+
     background = world.node_tree.nodes.get("Background")
     background.inputs["Color"].default_value = (0.55, 0.65, 0.8, 1)
     background.inputs["Strength"].default_value = 0.8
@@ -133,27 +137,32 @@ def person(name, x, color, timing):
     )
 
     sphere(
-        name + "_Hair", (x, 0.05, 3.1),
-        (0.58, 0.5, 0.3), (0.12, 0.07, 0.04, 1)
+        name + "_Hair",
+        (x, 0.05, 3.1),
+        (0.58, 0.5, 0.3),
+        (0.12, 0.07, 0.04, 1)
     )
 
     for side in [-1, 1]:
         sphere(
             name + "_Eye" + str(side),
             (x + side * 0.22, -0.48, 2.72),
-            (0.12, 0.09, 0.15), (1, 1, 1, 1)
+            (0.12, 0.09, 0.15),
+            (1, 1, 1, 1)
         )
 
         sphere(
             name + "_Pupil" + str(side),
             (x + side * 0.22, -0.55, 2.72),
-            (0.06, 0.04, 0.08), BLACK
+            (0.06, 0.04, 0.08),
+            BLACK
         )
 
         arm = sphere(
             name + "_Arm" + str(side),
             (x + side * 0.75, 0, 1.75),
-            (0.18, 0.22, 0.55), color
+            (0.18, 0.22, 0.55),
+            color
         )
 
         arm.rotation_euler[1] = side * 0.3
@@ -166,13 +175,18 @@ def person(name, x, color, timing):
         cylinder(
             name + "_Leg" + str(side),
             (x + side * 0.25, 0, 0.55),
-            0.18, 0.9, (0.15, 0.15, 0.2, 1)
+            0.18,
+            0.9,
+            (0.15, 0.15, 0.2, 1)
         )
 
     mouth = sphere(
-        name + "_Mouth", (x, -0.53, 2.43),
-        (0.16, 0.04, 0.015), BLACK
+        name + "_Mouth",
+        (x, -0.53, 2.43),
+        (0.16, 0.04, 0.015),
+        BLACK
     )
+
     animate_mouth(mouth, timing)
 
     head.keyframe_insert(data_path="location", frame=1)
@@ -182,51 +196,73 @@ def person(name, x, color, timing):
 
 def dog(name, x, timing):
     sphere(
-        name + "_Body", (x, 0, 0.8),
-        (0.65, 0.4, 0.4), (0.9, 0.85, 0.8, 1)
+        name + "_Body",
+        (x, 0, 0.8),
+        (0.65, 0.4, 0.4),
+        (0.9, 0.85, 0.8, 1)
     )
 
     sphere(
-        name + "_Head", (x, -0.1, 1.35),
-        (0.5, 0.45, 0.45), (0.95, 0.9, 0.85, 1)
+        name + "_Head",
+        (x, -0.1, 1.35),
+        (0.5, 0.45, 0.45),
+        (0.95, 0.9, 0.85, 1)
     )
 
     for side in [-1, 1]:
         sphere(
             name + "_Ear" + str(side),
             (x + side * 0.35, -0.1, 1.45),
-            (0.18, 0.2, 0.3), (0.45, 0.25, 0.15, 1)
+            (0.18, 0.2, 0.3),
+            (0.45, 0.25, 0.15, 1)
         )
 
-    sphere(name + "_Nose", (x, -0.5, 1.25), (0.12, 0.1, 0.1), BLACK)
+    sphere(
+        name + "_Nose",
+        (x, -0.5, 1.25),
+        (0.12, 0.1, 0.1),
+        BLACK
+    )
 
     mouth = sphere(
-        name + "_Mouth", (x, -0.48, 1.12),
-        (0.12, 0.04, 0.015), BLACK
+        name + "_Mouth",
+        (x, -0.48, 1.12),
+        (0.12, 0.04, 0.015),
+        BLACK
     )
+
     animate_mouth(mouth, timing)
 
 
 def bird(name, x, timing):
     sphere(
-        name + "_Body", (x, 0, 1.3),
-        (0.45, 0.35, 0.6), (0.15, 0.7, 0.2, 1)
+        name + "_Body",
+        (x, 0, 1.3),
+        (0.45, 0.35, 0.6),
+        (0.15, 0.7, 0.2, 1)
     )
 
     sphere(
-        name + "_Head", (x, 0, 1.9),
-        (0.4, 0.35, 0.4), (0.2, 0.8, 0.25, 1)
+        name + "_Head",
+        (x, 0, 1.9),
+        (0.4, 0.35, 0.4),
+        (0.2, 0.8, 0.25, 1)
     )
 
     beak = sphere(
-        name + "_Beak", (x, -0.35, 1.8),
-        (0.18, 0.2, 0.08), (1, 0.8, 0.1, 1)
+        name + "_Beak",
+        (x, -0.35, 1.8),
+        (0.18, 0.2, 0.08),
+        (1, 0.8, 0.1, 1)
     )
+
     animate_mouth(beak, timing)
 
     sphere(
-        name + "_Eye", (x + 0.15, -0.3, 1.95),
-        (0.08, 0.06, 0.1), BLACK
+        name + "_Eye",
+        (x + 0.15, -0.3, 1.95),
+        (0.08, 0.06, 0.1),
+        BLACK
     )
 
 
@@ -263,6 +299,7 @@ def main():
         episode = json.load(f)
 
     scenes = episode.get("scenes", [])
+
     if not scenes:
         raise RuntimeError("No scenes found in episode.json")
 
@@ -311,7 +348,7 @@ def main():
         if os.path.getsize(debug_file) < 1000:
             raise RuntimeError("Diagnostic PNG is blank or too small.")
 
-               # Check that the rendered image contains visible pixels
+        # Check that the rendered image contains visible pixels
         image = bpy.data.images.load(debug_file, check_existing=False)
         pixels = list(image.pixels)
 
@@ -329,7 +366,9 @@ def main():
         if brightness < 0.015:
             raise RuntimeError(
                 "BLACK RENDER DETECTED. Characters are not visible."
-            ) print("DIAGNOSTIC IMAGE CREATED:", debug_file)
+            )
+
+        print("DIAGNOSTIC IMAGE CREATED:", debug_file)
         print("Blender version:", bpy.app.version_string)
         print("Render engine:", scene.render.engine)
         print("Camera:", scene.camera.name)

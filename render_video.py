@@ -1,16 +1,37 @@
+"""Voice, lip-sync timing and final video assembly for Mooni Studio.
 
-import os
+python render_video.py voice   -> per-speaker voices + scene audio + timing JSON
+python render_video.py final   -> composite Blender characters over footage,
+                                  add audio and join the scenes
+"""
+
+import array
 import json
 import math
+import os
 import subprocess
-import wave
-import struct
 import sys
+import time
+import wave
 
-from gtts import gTTS
+from mooni_common import (
+    AUDIO_RATE,
+    FPS,
+    GAP_SECONDS,
+    NARRATOR,
+    OUTPUT_DIR,
+    TAIL_SECONDS,
+    VIDEO_HEIGHT,
+    VIDEO_WIDTH,
+    character_lookup,
+    load_characters,
+    normalise_envelope,
+    rms_envelope,
+    segment_frames,
+    voice_pitch,
+)
 
-FPS = 12
-OUTPUT_DIR = "output"
+FALLBACK_LINE = "आइए एक नई कहानी सुनते हैं।"
 
 
 def run(command, timeout=300):
@@ -51,6 +72,22 @@ def probe_video(path):
         raise RuntimeError("No video stream found: " + path)
 
     return info, video, audio
+
+
+def media_duration(path):
+    result = run([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        path
+    ])
+
+    duration = float(result.stdout.strip())
+
+    if duration <= 0:
+        raise RuntimeError("Invalid duration: " + path)
+
+    return duration
 
 
 def check_visible_video(path):
@@ -101,9 +138,7 @@ def check_visible_video(path):
 
         if brightness < 8 or variance < 3:
             raise RuntimeError(
-                "BLACK OR EMPTY VIDEO DETECTED: "
-                + path
-                + ". Blender may not have rendered visible characters."
+                "BLACK OR EMPTY VIDEO DETECTED: " + path
             )
 
     return duration
@@ -118,62 +153,184 @@ def check_audio(path):
     print("Audio stream verified:", path)
 
 
-def make_voice(text, path):
-    if not text.strip():
-        text = "आइए एक नई कहानी सुनते हैं।"
+# --------------------------------------------------------------------------
+# Voice
+# --------------------------------------------------------------------------
 
-    gTTS(text=text, lang="hi").save(path)
+def tts_to_file(text, path, attempts=3):
+    """Speak Hindi text with gTTS and save it as an MP3."""
+    from gtts import gTTS
 
-    if not os.path.exists(path) or os.path.getsize(path) < 1000:
-        raise RuntimeError("Voice generation failed: " + path)
+    last_error = None
+
+    for attempt in range(attempts):
+        try:
+            gTTS(text=text, lang="hi").save(path)
+
+            if os.path.exists(path) and os.path.getsize(path) >= 1000:
+                return
+
+            raise RuntimeError("gTTS produced an empty file.")
+
+        except Exception as error:
+            last_error = error
+            print(f"Voice attempt {attempt + 1} failed: {error}")
+            time.sleep(2 * (attempt + 1))
+
+    raise RuntimeError(f"Voice generation failed: {last_error}")
 
 
-def create_timing(audio_path, json_path, wav_path):
+def make_segment_wav(text, pitch, wav_path, tts=tts_to_file):
+    """Create a 24 kHz mono WAV for one line, pitch-shifted for the speaker.
+
+    asetrate raises pitch and speed together; atempo then restores the
+    original speed, so only the pitch changes.
+    """
+    raw_path = wav_path[:-4] + "_raw.mp3"
+
+    tts(text, raw_path)
+
+    filters = [f"aresample={AUDIO_RATE}"]
+
+    if abs(pitch - 1.0) >= 0.01:
+        filters += [
+            f"asetrate={int(AUDIO_RATE * pitch)}",
+            f"aresample={AUDIO_RATE}",
+            f"atempo={1.0 / pitch:.4f}",
+        ]
+
     run([
         "ffmpeg", "-y",
-        "-i", audio_path,
+        "-i", raw_path,
+        "-af", ",".join(filters),
         "-ac", "1",
-        "-ar", "12000",
+        "-ar", str(AUDIO_RATE),
+        "-c:a", "pcm_s16le",
         wav_path
     ])
 
-    with wave.open(wav_path, "rb") as audio:
-        rate = audio.getframerate()
-        width = audio.getsampwidth()
-        frames = audio.getnframes()
-        raw = audio.readframes(frames)
+    os.remove(raw_path)
 
-    if width != 2:
-        raise RuntimeError("Expected 16-bit audio.")
 
-    samples = struct.unpack(
-        "<" + "h" * (len(raw) // 2),
-        raw
-    )
+def read_pcm(path):
+    with wave.open(path, "rb") as audio:
+        if (
+            audio.getsampwidth() != 2
+            or audio.getnchannels() != 1
+            or audio.getframerate() != AUDIO_RATE
+        ):
+            raise RuntimeError("Unexpected audio format: " + path)
 
-    chunk = max(1, rate // FPS)
-    values = []
+        return audio.readframes(audio.getnframes())
 
-    for start in range(0, len(samples), chunk):
-        block = samples[start:start + chunk]
 
-        if not block:
+def scene_speech(scene):
+    """Ordered list of (speaker, text) for one scene."""
+    specs = []
+
+    narration = (scene.get("narration") or "").strip()
+
+    if narration:
+        specs.append((NARRATOR, narration))
+
+    for line in scene.get("dialogue", []):
+        if not isinstance(line, dict):
             continue
 
-        rms = math.sqrt(
-            sum(sample * sample for sample in block) / len(block)
+        text = (line.get("text") or "").strip()
+
+        if text:
+            specs.append((line.get("speaker") or NARRATOR, text))
+
+    if not specs:
+        specs.append((NARRATOR, FALLBACK_LINE))
+
+    return specs
+
+
+def build_scene_audio(index, specs, lookup, voice_dir, tts=tts_to_file):
+    """Speak every line, join them, and work out who talks when."""
+    parts_dir = os.path.join(voice_dir, "parts")
+    os.makedirs(parts_dir, exist_ok=True)
+
+    gap = b"\x00\x00" * int(AUDIO_RATE * GAP_SECONDS)
+    tail = b"\x00\x00" * int(AUDIO_RATE * TAIL_SECONDS)
+
+    pcm = bytearray()
+    segments = []
+
+    for number, (speaker, text) in enumerate(specs, 1):
+        part_path = os.path.join(
+            parts_dir, f"scene_{index:02d}_{number:02d}.wav"
         )
 
-        values.append(round(min(1.0, rms / 7000.0), 3))
+        make_segment_wav(
+            text, voice_pitch(speaker, lookup), part_path, tts
+        )
 
-    if not values:
+        if pcm:
+            pcm.extend(gap)
+
+        start = len(pcm) / 2 / AUDIO_RATE
+        pcm.extend(read_pcm(part_path))
+        end = len(pcm) / 2 / AUDIO_RATE
+
+        first, last = segment_frames(start, end)
+
+        segments.append({
+            "speaker": speaker,
+            "text": text,
+            "start": round(start, 3),
+            "end": round(end, 3),
+            "start_frame": first,
+            "end_frame": last,
+        })
+
+    pcm.extend(tail)
+
+    wav_path = os.path.join(voice_dir, f"scene_{index:02d}.wav")
+
+    with wave.open(wav_path, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(AUDIO_RATE)
+        out.writeframes(bytes(pcm))
+
+    samples = array.array("h")
+    samples.frombytes(bytes(pcm))
+
+    if sys.byteorder == "big":
+        samples.byteswap()
+
+    duration = len(samples) / AUDIO_RATE
+    n_frames = int(math.ceil(duration * FPS)) + 1
+
+    envelope = normalise_envelope(
+        rms_envelope(samples, AUDIO_RATE, FPS)
+    )
+
+    if not envelope:
         raise RuntimeError("No audio timing data generated.")
 
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(values, f)
+    envelope = (envelope + [0.0] * n_frames)[:n_frames]
+
+    timing = {
+        "fps": FPS,
+        "duration": round(duration, 3),
+        "n_frames": n_frames,
+        "envelope": envelope,
+        "segments": segments,
+    }
+
+    timing_path = os.path.join(voice_dir, f"scene_{index:02d}.json")
+
+    with open(timing_path, "w", encoding="utf-8") as f:
+        json.dump(timing, f, ensure_ascii=False)
+
+    return timing
 
 
-def generate_voices():
+def generate_voices(tts=tts_to_file):
     episode_path = OUTPUT_DIR + "/episode.json"
 
     if not os.path.exists(episode_path):
@@ -187,95 +344,169 @@ def generate_voices():
     if not scenes:
         raise RuntimeError("Episode contains no scenes.")
 
-    os.makedirs(OUTPUT_DIR + "/voice", exist_ok=True)
+    lookup = character_lookup(load_characters()["characters"])
+
+    voice_dir = OUTPUT_DIR + "/voice"
+    os.makedirs(voice_dir, exist_ok=True)
 
     for i, scene in enumerate(scenes, 1):
-        text_parts = []
+        print("Generating voices for scene:", i)
 
-        narration = scene.get("narration", "")
-        if narration:
-            text_parts.append(narration)
+        timing = build_scene_audio(
+            i, scene_speech(scene), lookup, voice_dir, tts
+        )
 
-        for line in scene.get("dialogue", []):
-            if isinstance(line, dict):
-                spoken = line.get("text", "")
-                if spoken:
-                    text_parts.append(spoken)
-
-        text = " ".join(text_parts)
-
-        audio_path = f"output/voice/scene_{i:02d}.mp3"
-        wav_path = f"output/voice/scene_{i:02d}.wav"
-        timing_path = f"output/voice/scene_{i:02d}.json"
-
-        print("Generating voice for scene:", i)
-
-        make_voice(text, audio_path)
-
-        create_timing(
-            audio_path,
-            timing_path,
-            wav_path
+        print(
+            f"Scene {i}: {timing['duration']}s, "
+            f"{len(timing['segments'])} spoken lines"
         )
 
     print("VOICE AND TIMING DATA READY")
 
 
-def render_scene(video_path, audio_path, output_path):
-    if not os.path.exists(video_path):
+# --------------------------------------------------------------------------
+# Video
+# --------------------------------------------------------------------------
+
+def usable_clip(path):
+    """True if a downloaded stock clip exists and can be decoded."""
+    if not os.path.isfile(path) or os.path.getsize(path) < 10000:
+        return False
+
+    try:
+        probe_video(path)
+        return True
+    except Exception as error:
+        print("Ignoring unusable stock clip:", path, error)
+        return False
+
+
+def check_character_frames(frames_dir, n_frames):
+    """Make sure Blender produced frames and the characters are visible."""
+    first = f"{frames_dir}/frame_0001.png"
+    last = f"{frames_dir}/frame_{n_frames:04d}.png"
+
+    for path in (first, last):
+        if not os.path.isfile(path):
+            raise RuntimeError("MISSING BLENDER FRAME: " + path)
+
+    middle = f"{frames_dir}/frame_{max(1, n_frames // 2):04d}.png"
+
+    result = subprocess.run(
+        [
+            "ffmpeg", "-v", "error",
+            "-i", middle,
+            "-vf", "scale=90:160",
+            "-frames:v", "1",
+            "-f", "rawvideo",
+            "-pix_fmt", "rgba",
+            "pipe:1"
+        ],
+        capture_output=True,
+        timeout=60
+    )
+
+    expected = 90 * 160 * 4
+
+    if result.returncode != 0 or len(result.stdout) < expected:
+        raise RuntimeError("Could not read Blender frame: " + middle)
+
+    alpha = result.stdout[3:expected:4]
+    coverage = sum(1 for value in alpha if value > 16) / len(alpha)
+
+    print(f"Character coverage in {middle}: {coverage:.1%}")
+
+    if coverage < 0.01:
         raise RuntimeError(
-            "BLENDER CHARACTER VIDEO IS MISSING: " + video_path
+            "NO CHARACTERS VISIBLE in Blender frames: " + frames_dir
         )
 
-    if not os.path.exists(audio_path):
-        raise RuntimeError("Audio file is missing: " + audio_path)
 
-    check_visible_video(video_path)
-
-    duration_result = run([
-        "ffprobe", "-v", "error",
-        "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1",
-        audio_path
-    ])
-
-    duration = float(duration_result.stdout.strip())
-
-    if duration <= 0:
-        raise RuntimeError("Invalid audio duration.")
+def composite_scene(frames_dir, audio_path, background, output_path):
+    """Overlay Blender character frames on footage and add the voice."""
+    duration = media_duration(audio_path)
 
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-    filters = (
-        "scale=720:1280:force_original_aspect_ratio=increase,"
-        "crop=720:1280,"
-        "setsar=1,"
-        "fps=24"
+    size = f"{VIDEO_WIDTH}x{VIDEO_HEIGHT}"
+
+    if background:
+        background_input = ["-stream_loop", "-1", "-i", background]
+        background_filter = (
+            f"[0:v]scale={VIDEO_WIDTH}:{VIDEO_HEIGHT}"
+            ":force_original_aspect_ratio=increase,"
+            f"crop={VIDEO_WIDTH}:{VIDEO_HEIGHT},"
+            "setsar=1,fps=24,format=yuv420p[bg]"
+        )
+    else:
+        # No stock clip for this scene: plain sky with a grass strip.
+        background_input = [
+            "-f", "lavfi",
+            "-i", f"color=c=0x8EC5F0:s={size}:r=24"
+        ]
+        background_filter = (
+            "[0:v]drawbox=x=0:y=ih*0.62:w=iw:h=ih*0.4"
+            ":color=0x56A85A:t=fill,"
+            "setsar=1,fps=24,format=yuv420p[bg]"
+        )
+
+    filter_complex = (
+        background_filter + ";"
+        "[1:v]format=rgba,fps=24[fg];"
+        "[bg][fg]overlay=x=0:y=0:eof_action=repeat:format=auto,"
+        "format=yuv420p[v]"
     )
 
     run([
         "ffmpeg", "-y",
-        "-stream_loop", "-1",
-        "-i", video_path,
+        *background_input,
+        "-framerate", str(FPS),
+        "-start_number", "1",
+        "-i", f"{frames_dir}/frame_%04d.png",
         "-i", audio_path,
-        "-t", str(duration),
-        "-vf", filters,
-        "-map", "0:v:0",
-        "-map", "1:a:0",
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", "2:a:0",
+        "-t", f"{duration:.3f}",
         "-c:v", "libx264",
-        "-preset", "ultrafast",
-        "-crf", "23",
+        "-preset", "veryfast",
+        "-crf", "21",
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac",
         "-b:a", "128k",
-        "-pix_fmt", "yuv420p",
+        "-ar", str(AUDIO_RATE),
+        "-ac", "1",
         "-movflags", "+faststart",
         output_path
-    ])
+    ], timeout=900)
+
+
+def render_scene(index, timing):
+    frames_dir = f"{OUTPUT_DIR}/3dframes/scene_{index:02d}"
+    audio_path = f"{OUTPUT_DIR}/voice/scene_{index:02d}.wav"
+    clip_path = f"{OUTPUT_DIR}/clips/scene_{index:02d}.mp4"
+    output_path = f"{OUTPUT_DIR}/scenes/scene_{index:02d}.mp4"
+
+    if not os.path.exists(audio_path):
+        raise RuntimeError("Audio file is missing: " + audio_path)
+
+    check_character_frames(frames_dir, timing["n_frames"])
+
+    background = clip_path if usable_clip(clip_path) else None
+
+    if background:
+        print(f"Scene {index}: using stock footage {clip_path}")
+    else:
+        print(f"Scene {index}: no usable stock footage, using plain background")
+
+    composite_scene(frames_dir, audio_path, background, output_path)
 
     check_visible_video(output_path)
     check_audio(output_path)
 
     print("Scene completed:", output_path)
+
+    return output_path
 
 
 def finalize_video():
@@ -292,36 +523,37 @@ def finalize_video():
     if not scenes:
         raise RuntimeError("No scenes to render.")
 
-    os.makedirs("output/scenes", exist_ok=True)
+    os.makedirs(OUTPUT_DIR + "/scenes", exist_ok=True)
 
     rendered = []
 
-    for i, scene in enumerate(scenes, 1):
+    for i in range(1, len(scenes) + 1):
         print("Finalizing scene:", i)
 
-        audio_path = f"output/voice/scene_{i:02d}.mp3"
-        video_path = f"output/3dclips/scene_{i:02d}.mp4"
-        scene_path = f"output/scenes/scene_{i:02d}.mp4"
+        timing_path = f"{OUTPUT_DIR}/voice/scene_{i:02d}.json"
 
-        render_scene(
-            video_path,
-            audio_path,
-            scene_path
-        )
+        if not os.path.exists(timing_path):
+            raise RuntimeError("Missing audio timing: " + timing_path)
 
-        rendered.append(scene_path)
+        with open(timing_path, encoding="utf-8") as f:
+            timing = json.load(f)
 
-    with open("output/concat.txt", "w", encoding="utf-8") as f:
+        rendered.append(render_scene(i, timing))
+
+    concat_path = OUTPUT_DIR + "/concat.txt"
+
+    with open(concat_path, "w", encoding="utf-8") as f:
         for path in rendered:
-            f.write("file '" + os.path.abspath(path) + "'\n")
+            safe = os.path.abspath(path).replace("'", "'\\''")
+            f.write("file '" + safe + "'\n")
 
-    final_path = "output/mooni_episode.mp4"
+    final_path = OUTPUT_DIR + "/mooni_episode.mp4"
 
     run([
         "ffmpeg", "-y",
         "-f", "concat",
         "-safe", "0",
-        "-i", "output/concat.txt",
+        "-i", concat_path,
         "-c", "copy",
         "-movflags", "+faststart",
         final_path

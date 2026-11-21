@@ -1,4 +1,3 @@
-
 {
   "visual_style": "Original colorful cinematic 3D cartoon for children, Indian village environment, expressive faces, warm lighting, consistent character designs, family friendly, high quality animation style",
   "characters": [
@@ -6,55 +5,158 @@
       "name": "Golu",
       "age": 8,
       "appearance": "Indian village boy with round cheerful face, short black hair, blue kurta and brown shorts, big expressive brown eyes",
-      "personality": "Curious, brave, playful"
+      "personality": "Curious, brave, playful",
+      "design": {
+        "kind": "human",
+        "height": 0.85,
+        "skin": "#C98E5F",
+        "hair": "#1B1B1B",
+        "hair_style": "short",
+        "top": "#2F6FE0",
+        "bottom": "#7A4B2A",
+        "legs": "shorts",
+        "extras": [],
+        "pitch": 1.18
+      }
     },
     {
       "name": "Tara",
       "age": 8,
       "appearance": "Indian village girl with two black braids, yellow dress, expressive brown eyes and friendly smile",
-      "personality": "Clever, kind, adventurous"
+      "personality": "Clever, kind, adventurous",
+      "design": {
+        "kind": "human",
+        "height": 0.85,
+        "skin": "#D49A6A",
+        "hair": "#1B1B1B",
+        "hair_style": "braids",
+        "top": "#F5C518",
+        "bottom": "#F5C518",
+        "legs": "skirt",
+        "extras": [],
+        "pitch": 1.28
+      }
     },
     {
       "name": "Moti",
       "age": 2,
       "appearance": "Cute fluffy white and brown puppy, floppy ears, round eyes and a red collar",
-      "personality": "Playful, loyal, funny"
+      "personality": "Playful, loyal, funny",
+      "design": {
+        "kind": "dog",
+        "height": 0.9,
+        "fur": "#F4EDE2",
+        "fur_secondary": "#8B5A2B",
+        "accent": "#D42A2A",
+        "extras": ["collar"],
+        "pitch": 1.38
+      }
     },
     {
       "name": "Dadi",
       "age": 65,
       "appearance": "Kind Indian grandmother with silver hair in a bun, green sari and warm smile",
-      "personality": "Wise, loving, magical storyteller"
+      "personality": "Wise, loving, magical storyteller",
+      "design": {
+        "kind": "human",
+        "height": 0.95,
+        "skin": "#B98255",
+        "hair": "#C9CED6",
+        "hair_style": "bun",
+        "top": "#2E8B57",
+        "bottom": "#2E8B57",
+        "legs": "skirt",
+        "extras": [],
+        "pitch": 0.85
+      }
     },
     {
       "name": "Aarav",
       "age": 10,
       "appearance": "Indian village boy with wavy black hair, green jacket, orange shirt and tan trousers",
-      "personality": "Energetic, creative, friendly"
+      "personality": "Energetic, creative, friendly",
+      "design": {
+        "kind": "human",
+        "height": 1.0,
+        "skin": "#C48A5E",
+        "hair": "#1B1B1B",
+        "hair_style": "wavy",
+        "top": "#F28C28",
+        "bottom": "#C8A878",
+        "accent": "#3A8F3A",
+        "legs": "long",
+        "extras": ["jacket"],
+        "pitch": 1.05
+      }
     },
     {
       "name": "Meera",
       "age": 10,
       "appearance": "Indian village girl with shoulder length black hair, yellow hairband, purple kurti and turquoise leggings",
-      "personality": "Smart, courageous, caring"
+      "personality": "Smart, courageous, caring",
+      "design": {
+        "kind": "human",
+        "height": 1.0,
+        "skin": "#D2976B",
+        "hair": "#1B1B1B",
+        "hair_style": "shoulder",
+        "top": "#8E44AD",
+        "bottom": "#1ABC9C",
+        "accent": "#FFD400",
+        "legs": "long",
+        "extras": ["hairband"],
+        "pitch": 1.22
+      }
     },
     {
       "name": "Chiku",
       "age": 2,
       "appearance": "Cute orange baby fox with cream muzzle, fluffy cream tail tip and blue neckerchief",
-      "personality": "Mischievous, curious, affectionate"
+      "personality": "Mischievous, curious, affectionate",
+      "design": {
+        "kind": "fox",
+        "height": 0.9,
+        "fur": "#E8771E",
+        "fur_secondary": "#FFF1D6",
+        "accent": "#2A6FDB",
+        "extras": ["neckerchief"],
+        "pitch": 1.35
+      }
     },
     {
       "name": "Bholu",
       "age": 3,
       "appearance": "Friendly green parrot with bright feathers, yellow beak and tiny yellow satchel",
-      "personality": "Funny, talkative, helpful"
+      "personality": "Funny, talkative, helpful",
+      "design": {
+        "kind": "parrot",
+        "height": 1.0,
+        "fur": "#2EAD3A",
+        "fur_secondary": "#1B7F2A",
+        "beak": "#FFC21A",
+        "accent": "#FFD34D",
+        "extras": ["satchel"],
+        "pitch": 1.45
+      }
     },
     {
       "name": "Uncle Bhola",
       "age": 45,
       "appearance": "Friendly Indian village uncle with moustache, round spectacles, sky blue kurta, cream waistcoat and sandals",
-      "personality": "Helpful, humorous, wise"
+      "personality": "Helpful, humorous, wise",
+      "design": {
+        "kind": "human",
+        "height": 1.1,
+        "skin": "#B27B52",
+        "hair": "#1B1B1B",
+        "hair_style": "short",
+        "top": "#6EC1F0",
+        "bottom": "#F3E7C8",
+        "accent": "#F3E7C8",
+        "legs": "long",
+        "extras": ["moustache", "glasses", "waistcoat"],
+        "pitch": 0.78
+      }
     }
   ]
 }

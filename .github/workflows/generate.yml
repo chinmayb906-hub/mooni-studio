@@ -44,6 +44,10 @@ jobs:
             libglib2.0-0 \
             mesa-utils
 
+      - name: Run offline pipeline tests
+        run: |
+          python -m unittest discover -s tests -v
+
       - name: Verify API keys
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -70,15 +74,15 @@ jobs:
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: |
-          mkdir -p output/3dclips
+          mkdir -p output/3dframes
           xvfb-run -a blender -b -t 2 \
             --python-exit-code 1 \
             --python blender_animation.py
 
-          echo "Checking Blender video output..."
-          ls -lah output/3dclips/
+          echo "Checking Blender PNG frames..."
+          find output/3dframes -type f -name "frame_*.png" -print
 
-          test -s output/3dclips/scene_01.mp4
+          test -s output/3dframes/scene_01/frame_0001.png
 
       - name: Create final video
         run: python render_video.py final
@@ -102,5 +106,6 @@ jobs:
             output/episode.json
             output/mooni_episode.mp4
             output/voice/
-            output/3dclips/
+            output/3dframes/
+            output/clips/
             output/scenes/

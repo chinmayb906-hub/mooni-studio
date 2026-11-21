@@ -1,16 +1,18 @@
-
-import os
 import json
+import os
+import re
 import time
-from google import genai
-from google.genai import types
 
-API_KEY = os.getenv("GEMINI_API_KEY")
-
-if not API_KEY:
-    raise RuntimeError("Missing GEMINI_API_KEY repository secret.")
-
-client = genai.Client(api_key=API_KEY)
+from mooni_common import (
+    MAX_CHARACTERS_PER_SCENE,
+    MAX_DIALOGUE_LINES,
+    MAX_SCENES,
+    NARRATOR,
+    OUTPUT_DIR,
+    canonical_speaker,
+    character_lookup,
+    load_characters,
+)
 
 MODELS = [
     "gemini-3.8-flash",
@@ -18,18 +20,41 @@ MODELS = [
     "gemini-3.5-flash-lite"
 ]
 
-MAX_SCENES = 4
+DEFAULT_VISUAL = "Colorful Indian village"
+DEFAULT_QUERY = "Indian village nature"
 
 
 def clean_json(text):
-    text = text.strip()
+    """Strip markdown code fences that models sometimes wrap around JSON."""
+    text = (text or "").strip()
+
     if text.startswith("```"):
-        text = text.split("\n", 1)[1]
-        text = text.rsplit("```", 1)[0].strip()
-    return text
+        text = re.sub(r"^```[A-Za-z]*\s*", "", text)
+        text = re.sub(r"\s*```$", "", text)
+
+    return text.strip()
 
 
-def validate_episode(data):
+def _clean_text(value, limit):
+    text = " ".join(str(value or "").split())
+    return text[:limit]
+
+
+def _clean_query(value, default):
+    """Stock search queries must be plain English words."""
+    text = re.sub(r"[^A-Za-z ]+", " ", str(value or ""))
+    text = " ".join(text.split())[:60]
+    return text or default
+
+
+def validate_episode(data, lookup):
+    """Normalise a model-written episode so later steps can trust it.
+
+    - at most MAX_SCENES scenes, numbered 1..n
+    - every speaker is a known character or Narrator
+    - every scene has 1..MAX_CHARACTERS_PER_SCENE known on-screen characters
+    - every scene has some spoken text
+    """
     if not isinstance(data, dict):
         raise ValueError("Episode must be a JSON object.")
 
@@ -38,41 +63,118 @@ def validate_episode(data):
     if not isinstance(scenes, list) or not scenes:
         raise ValueError("No scenes found.")
 
-    data["scenes"] = scenes[:MAX_SCENES]
+    default_names = [
+        c["name"] for c in list(lookup.values())[:2]
+    ]
 
-    for i, scene in enumerate(data["scenes"], 1):
-        scene["scene"] = i
-        scene.setdefault("visual", "Colorful Indian village")
-        scene.setdefault("stock_query", "Indian village nature")
-        scene.setdefault("narration", "")
-        scene.setdefault("characters", [])
+    cleaned = []
 
-        dialogue = scene.get("dialogue", [])
+    for raw in scenes:
+        if not isinstance(raw, dict):
+            continue
 
-        if isinstance(dialogue, str):
-            dialogue = [{
-                "speaker": "Narrator",
-                "text": dialogue
-            }]
+        number = len(cleaned) + 1
+        narration = _clean_text(raw.get("narration"), 300)
 
-        if not isinstance(dialogue, list):
-            dialogue = []
+        dialogue_in = raw.get("dialogue", [])
 
-        scene["dialogue"] = dialogue
+        if isinstance(dialogue_in, str):
+            dialogue_in = [{"speaker": NARRATOR, "text": dialogue_in}]
+
+        if not isinstance(dialogue_in, list):
+            dialogue_in = []
+
+        dialogue = []
+
+        for line in dialogue_in:
+            if not isinstance(line, dict):
+                continue
+
+            text = _clean_text(line.get("text"), 200)
+
+            if not text:
+                continue
+
+            speaker = canonical_speaker(line.get("speaker"), lookup)
+
+            dialogue.append({
+                "speaker": speaker or NARRATOR,
+                "text": text
+            })
+
+            if len(dialogue) == MAX_DIALOGUE_LINES:
+                break
+
+        if not narration and not dialogue:
+            raise ValueError(f"Scene {number} has no spoken text.")
+
+        names = []
+
+        def add(name):
+            if (
+                name
+                and name != NARRATOR
+                and name not in names
+                and len(names) < MAX_CHARACTERS_PER_SCENE
+            ):
+                names.append(name)
+
+        listed = raw.get("characters", [])
+
+        if not isinstance(listed, list):
+            listed = []
+
+        for entry in listed:
+            add(canonical_speaker(entry, lookup))
 
         for line in dialogue:
-            if not isinstance(line, dict):
-                raise ValueError("Invalid dialogue format.")
-            line.setdefault("speaker", "Narrator")
-            line.setdefault("text", "")
+            add(line["speaker"])
 
-    data.setdefault("title", "Mooni Adventure")
-    data.setdefault("description", "A magical children's story.")
+        if not names:
+            names = list(default_names)
 
-    return data
+        cleaned.append({
+            "scene": number,
+            "characters": names,
+            "visual": _clean_text(raw.get("visual"), 300) or DEFAULT_VISUAL,
+            "stock_query": _clean_query(
+                raw.get("stock_query"), DEFAULT_QUERY
+            ),
+            "narration": narration,
+            "dialogue": dialogue,
+        })
+
+        if len(cleaned) == MAX_SCENES:
+            break
+
+    if not cleaned:
+        raise ValueError("No usable scenes found.")
+
+    return {
+        "title": _clean_text(data.get("title"), 100) or "Mooni Adventure",
+        "description": (
+            _clean_text(data.get("description"), 300)
+            or "A magical children's story."
+        ),
+        "scenes": cleaned,
+    }
 
 
-def generate_story(prompt):
+def make_client():
+    api_key = os.getenv("GEMINI_API_KEY")
+
+    if not api_key:
+        raise RuntimeError("Missing GEMINI_API_KEY repository secret.")
+
+    from google import genai
+
+    return genai.Client(api_key=api_key)
+
+
+def generate_story(prompt, lookup):
+    from google.genai import types
+
+    client = make_client()
     last_error = None
 
     for model in MODELS:
@@ -93,7 +195,8 @@ def generate_story(prompt):
                     raise ValueError("Empty response from Gemini.")
 
                 return validate_episode(
-                    json.loads(clean_json(response.text))
+                    json.loads(clean_json(response.text)),
+                    lookup
                 )
 
             except Exception as error:
@@ -108,10 +211,7 @@ def generate_story(prompt):
     )
 
 
-def main():
-    with open("characters.json", encoding="utf-8") as f:
-        character_data = json.load(f)
-
+def build_prompt(character_data):
     characters = character_data["characters"]
 
     character_details = "\n".join(
@@ -120,7 +220,9 @@ def main():
         for c in characters
     )
 
-    prompt = f"""
+    names = ", ".join(c["name"] for c in characters)
+
+    return f"""
 Create an ORIGINAL high-quality children's cartoon episode.
 
 STYLE:
@@ -131,20 +233,21 @@ CHARACTERS:
 
 RULES:
 - Write the story in simple Hindi using Devanagari.
-- Use no more than 4 scenes.
-- Use at least 3 recurring characters.
+- Use no more than {MAX_SCENES} scenes.
+- Use between 2 and {MAX_CHARACTERS_PER_SCENE} characters in every scene, and at least 3 different characters in the whole episode.
 - Include a funny, magical or educational adventure.
 - Keep character appearances consistent.
 - Every scene must have English visual descriptions.
-- Every scene must have an English stock video search query.
-- Every scene must have Hindi narration.
-- Use separate speaker-labelled dialogue.
-- Allowed speaker names must match character names or Narrator.
+- Every scene must have an English stock video search query of 2 to 4 plain English words (a calm background such as a village, garden, river or sky; no people closeups).
+- Every scene must have short Hindi narration (at most 25 words).
+- Use separate speaker-labelled dialogue: 2 to {MAX_DIALOGUE_LINES} short lines per scene, each at most 15 words.
+- The "speaker" of each dialogue line must be exactly one of: {names}, or Narrator.
+- Every character who speaks must also be listed in that scene's "characters".
 - Give a meaningful happy ending.
 - Avoid violence, frightening scenes or inappropriate content.
 - Make the story suitable for children aged 3 to 10.
 - Avoid copyrighted characters and existing story plots.
-- Keep narration short enough for a YouTube Short.
+- Keep the whole episode short enough for a YouTube Short (under 60 seconds when spoken).
 
 Return valid JSON only:
 
@@ -173,12 +276,17 @@ Return valid JSON only:
 }}
 """
 
-    episode = generate_story(prompt)
 
-    os.makedirs("output", exist_ok=True)
+def main():
+    character_data = load_characters()
+    lookup = character_lookup(character_data["characters"])
+
+    episode = generate_story(build_prompt(character_data), lookup)
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     with open(
-        "output/episode.json",
+        OUTPUT_DIR + "/episode.json",
         "w",
         encoding="utf-8"
     ) as f:

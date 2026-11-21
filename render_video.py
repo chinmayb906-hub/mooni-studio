@@ -10,17 +10,112 @@ import sys
 from gtts import gTTS
 
 FPS = 12
+OUTPUT_DIR = "output"
 
 
-def run(command):
+def run(command, timeout=300):
     result = subprocess.run(
         command,
         capture_output=True,
         text=True,
-        timeout=240
+        timeout=timeout
     )
+
     if result.returncode != 0:
-        raise RuntimeError(result.stderr[-2000:])
+        raise RuntimeError(
+            "Command failed:\n" + result.stderr[-3000:]
+        )
+
+    return result
+
+
+def probe_video(path):
+    if not os.path.isfile(path) or os.path.getsize(path) < 1000:
+        raise RuntimeError("Video file missing or too small: " + path)
+
+    result = run([
+        "ffprobe", "-v", "error",
+        "-show_streams",
+        "-show_format",
+        "-of", "json",
+        path
+    ])
+
+    info = json.loads(result.stdout)
+    streams = info.get("streams", [])
+
+    video = [s for s in streams if s.get("codec_type") == "video"]
+    audio = [s for s in streams if s.get("codec_type") == "audio"]
+
+    if not video:
+        raise RuntimeError("No video stream found: " + path)
+
+    return info, video, audio
+
+
+def check_visible_video(path):
+    info, video, audio = probe_video(path)
+
+    duration = float(info.get("format", {}).get("duration", 0))
+
+    if duration <= 0:
+        raise RuntimeError("Invalid video duration: " + path)
+
+    print("Checking visible frames:", path)
+
+    for fraction in (0.20, 0.50, 0.80):
+        timestamp = max(0, duration * fraction)
+
+        result = subprocess.run(
+            [
+                "ffmpeg", "-v", "error",
+                "-ss", str(timestamp),
+                "-i", path,
+                "-frames:v", "1",
+                "-vf", "scale=32:32",
+                "-f", "rawvideo",
+                "-pix_fmt", "rgb24",
+                "pipe:1"
+            ],
+            capture_output=True,
+            timeout=60
+        )
+
+        if result.returncode != 0 or len(result.stdout) < 32 * 32 * 3:
+            raise RuntimeError(
+                "Could not read video frame at " + str(timestamp)
+            )
+
+        pixels = result.stdout
+        brightness = sum(pixels) / len(pixels)
+
+        variance = sum(
+            (value - brightness) ** 2 for value in pixels
+        ) / len(pixels)
+
+        print(
+            "Frame", fraction,
+            "brightness:", round(brightness, 2),
+            "variation:", round(variance, 2)
+        )
+
+        if brightness < 8 or variance < 3:
+            raise RuntimeError(
+                "BLACK OR EMPTY VIDEO DETECTED: "
+                + path
+                + ". Blender may not have rendered visible characters."
+            )
+
+    return duration
+
+
+def check_audio(path):
+    info, video, audio = probe_video(path)
+
+    if not audio:
+        raise RuntimeError("No audio stream found: " + path)
+
+    print("Audio stream verified:", path)
 
 
 def make_voice(text, path):
@@ -28,6 +123,9 @@ def make_voice(text, path):
         text = "आइए एक नई कहानी सुनते हैं।"
 
     gTTS(text=text, lang="hi").save(path)
+
+    if not os.path.exists(path) or os.path.getsize(path) < 1000:
+        raise RuntimeError("Voice generation failed: " + path)
 
 
 def create_timing(audio_path, json_path, wav_path):
@@ -39,8 +137,6 @@ def create_timing(audio_path, json_path, wav_path):
         wav_path
     ])
 
-    values = []
-
     with wave.open(wav_path, "rb") as audio:
         rate = audio.getframerate()
         width = audio.getsampwidth()
@@ -50,9 +146,13 @@ def create_timing(audio_path, json_path, wav_path):
     if width != 2:
         raise RuntimeError("Expected 16-bit audio.")
 
-    samples = struct.unpack("<" + "h" * (len(raw) // 2), raw)
+    samples = struct.unpack(
+        "<" + "h" * (len(raw) // 2),
+        raw
+    )
 
     chunk = max(1, rate // FPS)
+    values = []
 
     for start in range(0, len(samples), chunk):
         block = samples[start:start + chunk]
@@ -61,23 +161,35 @@ def create_timing(audio_path, json_path, wav_path):
             continue
 
         rms = math.sqrt(
-            sum(s * s for s in block) / len(block)
+            sum(sample * sample for sample in block) / len(block)
         )
 
-        normalized = min(1.0, rms / 7000.0)
-        values.append(round(normalized, 3))
+        values.append(round(min(1.0, rms / 7000.0), 3))
+
+    if not values:
+        raise RuntimeError("No audio timing data generated.")
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(values, f)
 
 
 def generate_voices():
-    with open("output/episode.json", encoding="utf-8") as f:
+    episode_path = OUTPUT_DIR + "/episode.json"
+
+    if not os.path.exists(episode_path):
+        raise RuntimeError("Missing output/episode.json")
+
+    with open(episode_path, encoding="utf-8") as f:
         episode = json.load(f)
 
-    os.makedirs("output/voice", exist_ok=True)
+    scenes = episode.get("scenes", [])
 
-    for i, scene in enumerate(episode["scenes"], 1):
+    if not scenes:
+        raise RuntimeError("Episode contains no scenes.")
+
+    os.makedirs(OUTPUT_DIR + "/voice", exist_ok=True)
+
+    for i, scene in enumerate(scenes, 1):
         text_parts = []
 
         narration = scene.get("narration", "")
@@ -96,7 +208,7 @@ def generate_voices():
         wav_path = f"output/voice/scene_{i:02d}.wav"
         timing_path = f"output/voice/scene_{i:02d}.json"
 
-        print("Generating voice:", i)
+        print("Generating voice for scene:", i)
 
         make_voice(text, audio_path)
 
@@ -110,17 +222,29 @@ def generate_voices():
 
 
 def render_scene(video_path, audio_path, output_path):
-    duration = float(
-        subprocess.check_output(
-            [
-                "ffprobe", "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
-                audio_path
-            ],
-            text=True
-        ).strip()
-    )
+    if not os.path.exists(video_path):
+        raise RuntimeError(
+            "BLENDER CHARACTER VIDEO IS MISSING: " + video_path
+        )
+
+    if not os.path.exists(audio_path):
+        raise RuntimeError("Audio file is missing: " + audio_path)
+
+    check_visible_video(video_path)
+
+    duration_result = run([
+        "ffprobe", "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        audio_path
+    ])
+
+    duration = float(duration_result.stdout.strip())
+
+    if duration <= 0:
+        raise RuntimeError("Invalid audio duration.")
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     filters = (
         "scale=720:1280:force_original_aspect_ratio=increase,"
@@ -129,55 +253,50 @@ def render_scene(video_path, audio_path, output_path):
         "fps=24"
     )
 
-    if os.path.exists(video_path):
-        command = [
-            "ffmpeg", "-y",
-            "-stream_loop", "-1",
-            "-i", video_path,
-            "-i", audio_path,
-            "-t", str(duration),
-            "-vf", filters,
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "27",
-            "-c:a", "aac",
-            "-b:a", "128k",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path
-        ]
-    else:
-        command = [
-            "ffmpeg", "-y",
-            "-f", "lavfi",
-            "-i", "color=c=0x182447:s=720x1280:r=24",
-            "-i", audio_path,
-            "-t", str(duration),
-            "-map", "0:v:0",
-            "-map", "1:a:0",
-            "-c:v", "libx264",
-            "-preset", "ultrafast",
-            "-crf", "27",
-            "-c:a", "aac",
-            "-pix_fmt", "yuv420p",
-            "-movflags", "+faststart",
-            output_path
-        ]
+    run([
+        "ffmpeg", "-y",
+        "-stream_loop", "-1",
+        "-i", video_path,
+        "-i", audio_path,
+        "-t", str(duration),
+        "-vf", filters,
+        "-map", "0:v:0",
+        "-map", "1:a:0",
+        "-c:v", "libx264",
+        "-preset", "ultrafast",
+        "-crf", "23",
+        "-c:a", "aac",
+        "-b:a", "128k",
+        "-pix_fmt", "yuv420p",
+        "-movflags", "+faststart",
+        output_path
+    ])
 
-    run(command)
+    check_visible_video(output_path)
+    check_audio(output_path)
+
+    print("Scene completed:", output_path)
 
 
 def finalize_video():
-    with open("output/episode.json", encoding="utf-8") as f:
+    episode_path = OUTPUT_DIR + "/episode.json"
+
+    if not os.path.exists(episode_path):
+        raise RuntimeError("Missing episode.json")
+
+    with open(episode_path, encoding="utf-8") as f:
         episode = json.load(f)
+
+    scenes = episode.get("scenes", [])
+
+    if not scenes:
+        raise RuntimeError("No scenes to render.")
 
     os.makedirs("output/scenes", exist_ok=True)
 
     rendered = []
 
-    for i, scene in enumerate(episode["scenes"], 1):
+    for i, scene in enumerate(scenes, 1):
         print("Finalizing scene:", i)
 
         audio_path = f"output/voice/scene_{i:02d}.mp3"
@@ -196,6 +315,8 @@ def finalize_video():
         for path in rendered:
             f.write("file '" + os.path.abspath(path) + "'\n")
 
+    final_path = "output/mooni_episode.mp4"
+
     run([
         "ffmpeg", "-y",
         "-f", "concat",
@@ -203,11 +324,16 @@ def finalize_video():
         "-i", "output/concat.txt",
         "-c", "copy",
         "-movflags", "+faststart",
-        "output/mooni_episode.mp4"
+        final_path
     ])
 
-    print("FINAL VIDEO CREATED!")
-    print("output/mooni_episode.mp4")
+    check_visible_video(final_path)
+    check_audio(final_path)
+
+    print("================================")
+    print("MOONI STUDIO VIDEO CREATED!")
+    print(final_path)
+    print("================================")
 
 
 if __name__ == "__main__":
@@ -215,9 +341,9 @@ if __name__ == "__main__":
 
     if mode == "voice":
         generate_voices()
+
     elif mode == "final":
         finalize_video()
+
     else:
-        raise RuntimeError(
-            "Use voice or final mode."
-        )
+        raise RuntimeError("Use voice or final mode.")

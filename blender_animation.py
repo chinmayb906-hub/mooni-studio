@@ -89,7 +89,7 @@ def setup(frame_end):
     camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 7.5
+    camera.data.ortho_scale = 5.8
     camera.data.lens = 50
     camera.data.clip_start = 0.1
     camera.data.clip_end = 200
@@ -311,7 +311,25 @@ def main():
         if os.path.getsize(debug_file) < 1000:
             raise RuntimeError("Diagnostic PNG is blank or too small.")
 
-        print("DIAGNOSTIC IMAGE CREATED:", debug_file)
+               # Check that the rendered image contains visible pixels
+        image = bpy.data.images.load(debug_file, check_existing=False)
+        pixels = list(image.pixels)
+
+        pixel_count = len(pixels) // 4
+
+        brightness = sum(
+            (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3
+            for i in range(0, len(pixels), 4)
+        ) / pixel_count
+
+        bpy.data.images.remove(image)
+
+        print("IMAGE BRIGHTNESS:", brightness)
+
+        if brightness < 0.015:
+            raise RuntimeError(
+                "BLACK RENDER DETECTED. Characters are not visible."
+            ) print("DIAGNOSTIC IMAGE CREATED:", debug_file)
         print("Blender version:", bpy.app.version_string)
         print("Render engine:", scene.render.engine)
         print("Camera:", scene.camera.name)

@@ -1,5 +1,5 @@
 
-name: Mooni Studio Advanced Episode Engine
+name: Mooni Studio Lip Sync Episode Generator
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
 
     steps:
       - name: Checkout Mooni Studio
@@ -30,29 +30,19 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      
       - name: Install FFmpeg and Blender
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg blender
-
 
       - name: Verify API keys
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
         run: |
-          if [ -z "$GEMINI_API_KEY" ]; then
-            echo "GEMINI_API_KEY is missing"
-            exit 1
-          fi
-
-          if [ -z "$PIXABAY_API_KEY" ]; then
-            echo "PIXABAY_API_KEY is missing"
-            exit 1
-          fi
-
-          echo "API keys are configured."
+          test -n "$GEMINI_API_KEY" || exit 1
+          test -n "$PIXABAY_API_KEY" || exit 1
+          echo "API keys configured."
 
       - name: Generate AI story
         env:
@@ -63,16 +53,18 @@ jobs:
         env:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
         run: python pixabay.py
-        
-      - name: Generate procedural 3D scenes
+
+      - name: Generate voices and audio timing
+        run: python render_video.py voice
+
+      - name: Generate audio-driven 3D animation
         run: |
           blender -b -t 2 --python blender_animation.py
 
+      - name: Create final video
+        run: python render_video.py final
 
-      - name: Render vertical episode
-        run: python render_video.py
-
-      - name: Verify video
+      - name: Verify final video
         run: |
           test -s output/mooni_episode.mp4
           ffprobe -v error \
@@ -84,12 +76,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: mooni-studio-episode
+          name: mooni-studio-lipsync-episode
           if-no-files-found: warn
           retention-days: 7
           path: |
             output/episode.json
             output/mooni_episode.mp4
             output/voice/
-            output/clips/
+            output/3dclips/
             output/scenes/

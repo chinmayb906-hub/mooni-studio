@@ -3,8 +3,10 @@ import bpy
 import os
 import math
 import json
+from mathutils import Vector
 
 OUT_DIR = "output/3dclips"
+FPS = 12
 
 BLUE = (0.12, 0.35, 0.85, 1)
 YELLOW = (1.0, 0.75, 0.1, 1)
@@ -12,9 +14,7 @@ PURPLE = (0.55, 0.25, 0.8, 1)
 GREEN = (0.2, 0.7, 0.25, 1)
 CYAN = (0.1, 0.8, 0.8, 1)
 SKIN = (0.95, 0.72, 0.52, 1)
-BLACK = (0.04, 0.04, 0.04, 1)
-
-FPS = 12
+BLACK = (0.02, 0.02, 0.02, 1)
 
 
 def material(name, color):
@@ -23,10 +23,9 @@ def material(name, color):
     mat.use_nodes = True
 
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
-
     if bsdf:
         bsdf.inputs["Base Color"].default_value = color
-        bsdf.inputs["Roughness"].default_value = 0.65
+        bsdf.inputs["Roughness"].default_value = 0.7
 
     return mat
 
@@ -37,14 +36,10 @@ def sphere(name, loc, scale, color):
         ring_count=16,
         location=loc
     )
-
     obj = bpy.context.object
     obj.name = name
     obj.scale = scale
-    obj.data.materials.append(
-        material(name + "Mat", color)
-    )
-
+    obj.data.materials.append(material(name + "Mat", color))
     bpy.ops.object.shade_smooth()
     return obj
 
@@ -56,13 +51,9 @@ def cylinder(name, loc, radius, depth, color):
         depth=depth,
         location=loc
     )
-
     obj = bpy.context.object
     obj.name = name
-    obj.data.materials.append(
-        material(name + "Mat", color)
-    )
-
+    obj.data.materials.append(material(name + "Mat", color))
     return obj
 
 
@@ -73,7 +64,6 @@ def setup(frame_end):
     scene.render.resolution_x = 720
     scene.render.resolution_y = 1280
     scene.render.resolution_percentage = 100
-
     scene.render.fps = FPS
     scene.frame_start = 1
     scene.frame_end = frame_end
@@ -88,29 +78,47 @@ def setup(frame_end):
     scene.view_settings.exposure = 0
     scene.view_settings.gamma = 1
 
-    scene.world.color = (0.5, 0.5, 0.5)
+    # Bright world background
+    world = bpy.data.worlds.new("MooniWorld")
+    scene.world = world
+    world.use_nodes = True
+    background = world.node_tree.nodes.get("Background")
+    background.inputs["Color"].default_value = (0.55, 0.65, 0.8, 1)
+    background.inputs["Strength"].default_value = 0.8
 
-    bpy.ops.object.camera_add(
-        location=(0, -16, 5)
-    )
-
+    # Camera aimed directly at the characters
+    bpy.ops.object.camera_add(location=(0, -16, 5))
     camera = bpy.context.object
-    camera.rotation_euler = (
-        math.radians(82), 0, 0
-    )
+
+    target = Vector((0, 0, 1.8))
+    direction = target - camera.location
+    camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = 8
+    camera.data.ortho_scale = 7.5
+    camera.data.lens = 50
+    camera.data.clip_start = 0.1
+    camera.data.clip_end = 200
     scene.camera = camera
 
+    # Main light
     bpy.ops.object.light_add(
         type="AREA",
-        location=(0, -7, 7)
+        location=(0, -7, 8)
     )
-
     light = bpy.context.object
-    light.data.energy = 2200
+    light.data.energy = 3000
     light.data.shape = "DISK"
     light.data.size = 10
+
+    # Additional front light
+    bpy.ops.object.light_add(
+        type="POINT",
+        location=(4, -5, 5)
+    )
+    fill = bpy.context.object
+    fill.data.energy = 500
+    fill.data.shadow_soft_size = 3
 
     scene.render.image_settings.color_mode = "RGB"
 
@@ -120,10 +128,8 @@ def ground():
         size=200,
         location=(0, 0, 0)
     )
-
     obj = bpy.context.object
     obj.name = "Ground"
-
     obj.data.materials.append(
         material("Grass", (0.25, 0.55, 0.25, 1))
     )
@@ -131,11 +137,7 @@ def ground():
 
 def animate_mouth(mouth, timing):
     for frame, value in enumerate(timing, 1):
-        mouth.scale.z = max(
-            0.015,
-            0.015 + value * 0.18
-        )
-
+        mouth.scale.z = 0.015 + max(0, value) * 0.18
         mouth.keyframe_insert(
             data_path="scale",
             frame=frame
@@ -187,22 +189,10 @@ def person(name, x, color, timing):
         )
 
         arm.rotation_euler[1] = side * 0.3
-        arm.keyframe_insert(
-            data_path="rotation_euler",
-            frame=1
-        )
+        arm.keyframe_insert(data_path="rotation_euler", frame=1)
 
         arm.rotation_euler[1] = side * 0.8
-        arm.keyframe_insert(
-            data_path="rotation_euler",
-            frame=24
-        )
-
-        arm.rotation_euler[1] = side * 0.3
-        arm.keyframe_insert(
-            data_path="rotation_euler",
-            frame=48
-        )
+        arm.keyframe_insert(data_path="rotation_euler", frame=24)
 
     for side in [-1, 1]:
         cylinder(
@@ -219,271 +209,142 @@ def person(name, x, color, timing):
         (0.16, 0.04, 0.015),
         BLACK
     )
-
     animate_mouth(mouth, timing)
 
-    head.keyframe_insert(
-        data_path="location",
-        frame=1
-    )
-
+    head.keyframe_insert(data_path="location", frame=1)
     head.location.z += 0.12
-
-    head.keyframe_insert(
-        data_path="location",
-        frame=24
-    )
-
-    head.location.z -= 0.12
-
-    head.keyframe_insert(
-        data_path="location",
-        frame=48
-    )
+    head.keyframe_insert(data_path="location", frame=24)
 
 
 def dog(name, x, timing):
-    sphere(
-        name + "_Body",
-        (x, 0, 0.8),
-        (0.65, 0.4, 0.4),
-        (0.9, 0.85, 0.8, 1)
-    )
+    sphere(name + "_Body", (x, 0, 0.8),
+           (0.65, 0.4, 0.4), (0.9, 0.85, 0.8, 1))
 
-    sphere(
-        name + "_Head",
-        (x, -0.1, 1.35),
-        (0.5, 0.45, 0.45),
-        (0.95, 0.9, 0.85, 1)
-    )
+    sphere(name + "_Head", (x, -0.1, 1.35),
+           (0.5, 0.45, 0.45), (0.95, 0.9, 0.85, 1))
 
-    sphere(
-        name + "_Ear",
-        (x - 0.35, -0.1, 1.45),
-        (0.18, 0.2, 0.3),
-        (0.45, 0.25, 0.15, 1)
-    )
+    for side in [-1, 1]:
+        sphere(name + "_Ear", (x + side * 0.35, -0.1, 1.45),
+               (0.18, 0.2, 0.3), (0.45, 0.25, 0.15, 1))
 
-    sphere(
-        name + "_Ear",
-        (x + 0.35, -0.1, 1.45),
-        (0.18, 0.2, 0.3),
-        (0.45, 0.25, 0.15, 1)
-    )
+    sphere(name + "_Nose", (x, -0.5, 1.25),
+           (0.12, 0.1, 0.1), BLACK)
 
-    sphere(
-        name + "_Nose",
-        (x, -0.5, 1.25),
-        (0.12, 0.1, 0.1),
-        BLACK
-    )
-
-    mouth = sphere(
-        name + "_Mouth",
-        (x, -0.48, 1.12),
-        (0.12, 0.04, 0.015),
-        BLACK
-    )
-
+    mouth = sphere(name + "_Mouth", (x, -0.48, 1.12),
+                   (0.12, 0.04, 0.015), BLACK)
     animate_mouth(mouth, timing)
 
 
 def bird(name, x, timing):
-    sphere(
-        name + "_Body",
-        (x, 0, 1.3),
-        (0.45, 0.35, 0.6),
-        (0.15, 0.7, 0.2, 1)
-    )
+    sphere(name + "_Body", (x, 0, 1.3),
+           (0.45, 0.35, 0.6), (0.15, 0.7, 0.2, 1))
 
-    sphere(
-        name + "_Head",
-        (x, 0, 1.9),
-        (0.4, 0.35, 0.4),
-        (0.2, 0.8, 0.25, 1)
-    )
+    sphere(name + "_Head", (x, 0, 1.9),
+           (0.4, 0.35, 0.4), (0.2, 0.8, 0.25, 1))
 
-    beak = sphere(
-        name + "_Beak",
-        (x, -0.35, 1.8),
-        (0.18, 0.2, 0.08),
-        (1, 0.8, 0.1, 1)
-    )
-
+    beak = sphere(name + "_Beak", (x, -0.35, 1.8),
+                  (0.18, 0.2, 0.08), (1, 0.8, 0.1, 1))
     animate_mouth(beak, timing)
 
-    sphere(
-        name + "_Eye",
-        (x + 0.15, -0.3, 1.95),
-        (0.08, 0.06, 0.1),
-        BLACK
-    )
+    sphere(name + "_Eye", (x + 0.15, -0.3, 1.95),
+           (0.08, 0.06, 0.1), BLACK)
+
+
+def create_character(name, x, color, timing):
+    key = name.strip().lower()
+
+    if key == "golu":
+        person("Golu", x, BLUE, timing)
+    elif key == "tara":
+        person("Tara", x, YELLOW, timing)
+    elif key == "moti":
+        dog("Moti", x, timing)
+    elif key == "dadi":
+        person("Dadi", x, PURPLE, timing)
+    elif key == "aarav":
+        person("Aarav", x, GREEN, timing)
+    elif key == "meera":
+        person("Meera", x, CYAN, timing)
+    elif key == "chiku":
+        dog("Chiku", x, timing)
+    elif key == "bholu":
+        bird("Bholu", x, timing)
+    elif key in ("uncle bhola", "unclebhola"):
+        person("UncleBhola", x, BLUE, timing)
+    else:
+        print("Unknown character; using fallback:", name)
+        person("ExtraCharacter", x, color, timing)
 
 
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    with open(
-        "output/episode.json",
-        encoding="utf-8"
-    ) as f:
+    with open("output/episode.json", encoding="utf-8") as f:
         episode = json.load(f)
 
     scenes = episode.get("scenes", [])
-
     if not scenes:
-        raise RuntimeError("No scenes found in episode.json")
+        raise RuntimeError("No scenes found.")
 
     for i, data in enumerate(scenes, 1):
-
-        timing_path = (
-            f"output/voice/scene_{i:02d}.json"
-        )
+        timing_path = f"output/voice/scene_{i:02d}.json"
 
         if not os.path.exists(timing_path):
-            raise RuntimeError(
-                f"Audio timing file missing: {timing_path}"
-            )
+            raise RuntimeError("Missing audio timing: " + timing_path)
 
-        with open(
-            timing_path,
-            encoding="utf-8"
-        ) as f:
+        with open(timing_path, encoding="utf-8") as f:
             timing = json.load(f)
 
         if not timing:
-            raise RuntimeError(
-                f"Audio timing data is empty for scene {i}"
-            )
-
-        frame_end = max(12, len(timing))
+            raise RuntimeError("Empty audio timing: " + timing_path)
 
         bpy.ops.object.select_all(action="SELECT")
         bpy.ops.object.delete(use_global=False)
 
-        setup(frame_end)
+        setup(max(12, len(timing)))
         ground()
 
         names = data.get("characters", [])
         positions = [-2, 0, 2]
+        colors = [BLUE, YELLOW, PURPLE]
 
         if not names:
-            raise RuntimeError(
-                f"No characters assigned to scene {i}"
-            )
-
-        
-        character_colors = [
-            BLUE,
-            YELLOW,
-            PURPLE
-        ]
+            raise RuntimeError("Scene has no characters: " + str(i))
 
         for j, name in enumerate(names[:3]):
-            original_name = str(name).strip()
-            name = original_name.lower()
-            x = positions[j]
-            color = character_colors[j]
-
-            if name == "golu":
-                person("Golu", x, BLUE, timing)
-
-            elif name == "tara":
-                person("Tara", x, YELLOW, timing)
-
-            elif name == "moti":
-                dog("Moti", x, timing)
-
-            elif name == "dadi":
-                person("Dadi", x, PURPLE, timing)
-
-            elif name == "aarav":
-                person("Aarav", x, GREEN, timing)
-
-            elif name == "meera":
-                person("Meera", x, CYAN, timing)
-
-            elif name == "chiku":
-                dog("Chiku", x, timing)
-
-            elif name == "bholu":
-                bird("Bholu", x, timing)
-
-            elif name in ("uncle bhola", "unclebhola"):
-                person("UncleBhola", x, BLUE, timing)
-
-            else:
-                safe_name = "ExtraCharacter" + str(j + 1)
-                print(
-                    "Unknown character name:",
-                    original_name,
-                    "- creating fallback character"
-                )
-                person(safe_name, x, color, timing)
-
-            name = str(name).lower()
-            x = positions[j]
-
-            if name == "golu":
-                person("Golu", x, BLUE, timing)
-
-            elif name == "tara":
-                person("Tara", x, YELLOW, timing)
-
-            elif name == "moti":
-                dog("Moti", x, timing)
-
-            elif name == "dadi":
-                person("Dadi", x, PURPLE, timing)
-
-            elif name == "aarav":
-                person("Aarav", x, GREEN, timing)
-
-            elif name == "meera":
-                person("Meera", x, CYAN, timing)
-
-            elif name == "chiku":
-                dog("Chiku", x, timing)
-
-            elif name == "bholu":
-                bird("Bholu", x, timing)
-
-            elif name == "uncle bhola":
-                person("UncleBhola", x, BLUE, timing)
+            create_character(
+                str(name),
+                positions[j],
+                colors[j],
+                timing
+            )
 
         scene = bpy.context.scene
         scene.frame_set(1)
-
-        scene.render.filepath = os.path.join(
-            OUT_DIR,
-            f"scene_{i:02d}.mp4"
-        )
-
-        print("Rendering character scene:", i)
-        print("Output path:", scene.render.filepath)
-        print("Characters:", names)
-
-        bpy.ops.render.render(animation=True)
 
         output_file = os.path.join(
             OUT_DIR,
             f"scene_{i:02d}.mp4"
         )
+        scene.render.filepath = output_file
+
+        print("Rendering scene:", i)
+        print("Characters:", names)
+        print("Camera:", scene.camera.name)
+
+        bpy.ops.render.render(animation=True)
 
         if not os.path.exists(output_file):
             raise RuntimeError(
-                "3D character video was not created."
+                "Blender did not create: " + output_file
             )
 
         if os.path.getsize(output_file) < 10000:
             raise RuntimeError(
-                "3D character video is unexpectedly small."
+                "Rendered video is too small: " + output_file
             )
 
-        print(
-            "3D character video created:",
-            output_file
-        )
+        print("SUCCESS:", output_file)
 
 
 if __name__ == "__main__":

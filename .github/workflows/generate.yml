@@ -33,7 +33,8 @@ jobs:
       - name: Install FFmpeg and Blender
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg blender
+          sudo apt-get update
+sudo apt-get install -y ffmpeg blender libegl1 libgl1 libgles2 libglib2.0-0
 
       - name: Verify API keys
         env:

@@ -627,61 +627,45 @@ def setup(n_frames):
         light.name = name
         light.data.energy = strength
         light.rotation_euler = rotation
-    
+
+
 def check_visible(path):
-    """Verify the diagnostic still contains visibly lit characters."""
+    """Check that the diagnostic still contains visibly lit characters.
+
+    Returns (coverage, brightness): the share of non-transparent pixels, and
+    the mean brightness of those pixels. Uses only the standard library, so
+    it works in any Blender build and in the offline tests.
+    """
     from array import array
 
     image = bpy.data.images.load(path, check_existing=False)
 
     try:
         width, height = image.size
-        buffer = array("f", [0.0]) * (width * height * 4)
-        image.pixels.foreach_get(buffer)
+        buffer = array("f", bytes(4 * width * height * 4))
+
+        try:
+            image.pixels.foreach_get(buffer)
+        except (TypeError, ValueError):
+            buffer = array("f", image.pixels[:])
     finally:
         bpy.data.images.remove(image)
 
+    pixel_count = width * height
     visible_pixels = 0
     brightness_total = 0.0
-    pixel_count = width * height
 
-    for i in range(0, len(buffer), 4):
-        red = buffer[i]
-        green = buffer[i + 1]
-        blue = buffer[i + 2]
-        alpha = buffer[i + 3]
-
+    for red, green, blue, alpha in zip(
+        buffer[0::4], buffer[1::4], buffer[2::4], buffer[3::4]
+    ):
         if alpha > 0.05:
             visible_pixels += 1
             brightness_total += (red + green + blue) / 3.0
 
-    coverage = visible_pixels / pixel_count if pixel_count else 0.0
-
-    if visible_pixels == 0:
+    if visible_pixels == 0 or pixel_count == 0:
         return 0.0, 0.0
 
-    brightness = brightness_total / visible_pixels
-    return coverage, brightness
-
-
-    image = bpy.data.images.load(path, check_existing=False)
-
-    try:
-        width, height = image.size
-        buffer = numpy.empty(width * height * 4, dtype=numpy.float32)
-        image.pixels.foreach_get(buffer)
-    finally:
-        bpy.data.images.remove(image)
-
-    pixels = buffer.reshape(-1, 4)
-    visible = pixels[:, 3] > 0.05
-    coverage = float(visible.mean())
-
-    if coverage == 0:
-        return 0.0, 0.0
-
-    brightness = float(pixels[visible][:, :3].mean())
-    return coverage, brightness
+    return visible_pixels / pixel_count, brightness_total / visible_pixels
 
 
 def resolve_cast(data, timing, lookup):

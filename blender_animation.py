@@ -585,6 +585,13 @@ def setup(n_frames):
     scene.frame_start = 1
     scene.frame_end = n_frames
 
+    # Fewer anti-aliasing samples keep rendering fast on machines without a
+    # graphics card (such as GitHub's), with little visible difference.
+    try:
+        scene.eevee.taa_render_samples = 16
+    except (AttributeError, TypeError):
+        pass
+
     # Transparent background: the stock footage is added later by ffmpeg.
     scene.render.film_transparent = True
 
@@ -688,6 +695,44 @@ def resolve_cast(data, timing, lookup):
     return names[:4]
 
 
+def characters_visible(coverage, brightness):
+    return coverage >= 0.01 and brightness >= 0.02
+
+
+def use_workbench(scene):
+    """Switch to Blender's simple Workbench renderer.
+
+    EEVEE can render a blank (black) picture on machines without a real
+    graphics card. Workbench is far simpler and uses each material's plain
+    colour, so the characters always show up (with flatter lighting).
+    """
+    scene.render.engine = "BLENDER_WORKBENCH"
+    shading = scene.display.shading
+    shading.light = "STUDIO"
+    shading.color_type = "MATERIAL"
+
+
+def render_diagnostic(scene, debug_file, frame):
+    """Render one still and return (coverage, brightness) of the characters."""
+    scene.render.image_settings.file_format = "PNG"
+    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.filepath = debug_file
+    scene.frame_set(frame)
+
+    print("Rendering diagnostic image:", debug_file,
+          "with", scene.render.engine)
+    bpy.ops.render.render(write_still=True)
+
+    if not os.path.exists(debug_file) or os.path.getsize(debug_file) < 1000:
+        raise RuntimeError("Diagnostic PNG missing or blank: " + debug_file)
+
+    coverage, brightness = check_visible(debug_file)
+    print("CHARACTER COVERAGE:", round(coverage, 3),
+          "BRIGHTNESS:", round(brightness, 3))
+
+    return coverage, brightness
+
+
 def render_scene(index, data, timing, lookup):
     n_frames = int(timing["n_frames"])
 
@@ -729,22 +774,16 @@ def render_scene(index, data, timing, lookup):
 
     # Diagnostic still from the middle of the scene.
     debug_file = os.path.abspath(f"{FRAMES_DIR}/debug_scene_{index:02d}.png")
-    scene.render.image_settings.file_format = "PNG"
-    scene.render.image_settings.color_mode = "RGBA"
-    scene.render.filepath = debug_file
-    scene.frame_set(max(1, n_frames // 2))
+    middle = max(1, n_frames // 2)
 
-    print("Rendering diagnostic image:", debug_file)
-    bpy.ops.render.render(write_still=True)
+    coverage, brightness = render_diagnostic(scene, debug_file, middle)
 
-    if not os.path.exists(debug_file) or os.path.getsize(debug_file) < 1000:
-        raise RuntimeError("Diagnostic PNG missing or blank: " + debug_file)
+    if not characters_visible(coverage, brightness):
+        print("The picture looks empty; retrying with the Workbench renderer.")
+        use_workbench(scene)
+        coverage, brightness = render_diagnostic(scene, debug_file, middle)
 
-    coverage, brightness = check_visible(debug_file)
-    print("CHARACTER COVERAGE:", round(coverage, 3),
-          "BRIGHTNESS:", round(brightness, 3))
-
-    if coverage < 0.01 or brightness < 0.02:
+    if not characters_visible(coverage, brightness):
         raise RuntimeError(
             "BLACK OR EMPTY RENDER DETECTED. Characters are not visible."
         )

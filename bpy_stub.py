@@ -14,7 +14,6 @@ import types
 
 class _Namespace(types.SimpleNamespace):
     def __getattr__(self, name):
-        # Unknown attributes read as harmless numbers/namespaces.
         value = _Namespace()
         object.__setattr__(self, name, value)
         return value
@@ -114,6 +113,7 @@ class _Engine:
 class Bpy(types.ModuleType):
     def __init__(self):
         super().__init__("bpy")
+
         self.app = _Namespace(version_string="stub")
         self.objects = []
         self.render_log = []
@@ -137,11 +137,16 @@ class Bpy(types.ModuleType):
             camera=None,
             world=None,
         )
+
         self.scene.frame_set = lambda frame: None
         self.scene_objects = self.objects
         self.scene.objects = self.objects
 
-        self.context = _Namespace(scene=self.scene, object=None)
+        self.context = _Namespace(
+            scene=self.scene,
+            object=None,
+        )
+
         self.data = _Namespace(
             materials=_Materials(),
             worlds=_Worlds(),
@@ -150,6 +155,7 @@ class Bpy(types.ModuleType):
             lights=_Collection(),
             images=_Images(),
         )
+
         self.ops = _Namespace(
             mesh=_Namespace(),
             object=_Namespace(),
@@ -169,14 +175,19 @@ class Bpy(types.ModuleType):
         self.ops.object.empty_add = self._adder("empty_add")
         self.ops.object.camera_add = self._adder("camera_add")
         self.ops.object.light_add = self._adder("light_add")
+
         self.ops.object.shade_smooth = lambda **kw: None
         self.ops.object.select_all = lambda **kw: None
         self.ops.object.delete = self._delete
+
         self.ops.render.render = self._render
 
     def _adder(self, kind):
         def add(**kwargs):
-            obj = StubObject(kind, kwargs.get("location", (0, 0, 0)))
+            obj = StubObject(
+                kind,
+                kwargs.get("location", (0, 0, 0)),
+            )
             self.objects.append(obj)
             self.context.object = obj
             return {"FINISHED"}
@@ -194,15 +205,23 @@ class Bpy(types.ModuleType):
 
         if animation:
             for frame in range(
-                self.scene.frame_start, self.scene.frame_end + 1
+                self.scene.frame_start,
+                self.scene.frame_end + 1,
             ):
-                self._write(path.replace("####", "%04d" % frame) + ".png")
+                self._write(
+                    path.replace("####", "%04d" % frame) + ".png"
+                )
 
-        self.render_log.append((write_still, animation, path))
+        self.render_log.append(
+            (write_still, animation, path)
+        )
 
     @staticmethod
     def _write(path):
-        os.makedirs(os.path.dirname(path), exist_ok=True)
+        directory = os.path.dirname(path)
+
+        if directory:
+            os.makedirs(directory, exist_ok=True)
 
         with open(path, "wb") as f:
             f.write(b"\x89PNG" + b"0" * 2000)

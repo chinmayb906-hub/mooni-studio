@@ -33,6 +33,9 @@ from mooni_common import (
 
 FALLBACK_LINE = "आइए एक नई कहानी सुनते हैं।"
 
+# Seconds to wait after each successful voice request (be gentle with gTTS).
+PAUSE_BETWEEN_VOICE_REQUESTS = 0.6
+
 
 def run(command, timeout=300):
     result = subprocess.run(
@@ -157,8 +160,13 @@ def check_audio(path):
 # Voice
 # --------------------------------------------------------------------------
 
-def tts_to_file(text, path, attempts=3):
-    """Speak Hindi text with gTTS and save it as an MP3."""
+def tts_to_file(text, path, attempts=4):
+    """Speak Hindi text with gTTS and save it as an MP3.
+
+    The free gTTS service can refuse requests that arrive too quickly (HTTP
+    429), especially from cloud machines, so each success is followed by a
+    short pause and failures are retried with a growing wait.
+    """
     from gtts import gTTS
 
     last_error = None
@@ -168,6 +176,7 @@ def tts_to_file(text, path, attempts=3):
             gTTS(text=text, lang="hi").save(path)
 
             if os.path.exists(path) and os.path.getsize(path) >= 1000:
+                time.sleep(PAUSE_BETWEEN_VOICE_REQUESTS)
                 return
 
             raise RuntimeError("gTTS produced an empty file.")
@@ -175,7 +184,9 @@ def tts_to_file(text, path, attempts=3):
         except Exception as error:
             last_error = error
             print(f"Voice attempt {attempt + 1} failed: {error}")
-            time.sleep(2 * (attempt + 1))
+
+            if attempt < attempts - 1:
+                time.sleep(3 * (attempt + 1))
 
     raise RuntimeError(f"Voice generation failed: {last_error}")
 

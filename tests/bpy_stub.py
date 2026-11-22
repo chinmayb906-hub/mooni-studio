@@ -1,4 +1,3 @@
-
 """A tiny stand-in for Blender's `bpy` module.
 
 It is NOT Blender: it only records what blender_animation.py asks for, so the
@@ -94,7 +93,9 @@ class _Image:
     class pixels:  # noqa: N801
         @staticmethod
         def foreach_get(buffer):
-            buffer[:] = 0.5
+            # Works for array.array and numpy buffers alike.
+            for index in range(len(buffer)):
+                buffer[index] = 0.5
 
 
 class _Images:

@@ -15,6 +15,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 import wave
 import zlib
@@ -724,6 +725,104 @@ class BlenderScriptDryRun(unittest.TestCase):
             )
             self.assertIsNotNone(actor.mouth, character["name"])
             self.assertEqual(len(actor.eyes), 4, character["name"])
+
+    def scene_one(self):
+        with open("output/voice/scene_01.json") as f:
+            timing = json.load(f)
+        with open("output/episode.json") as f:
+            scene = json.load(f)["scenes"][0]
+        return scene, timing
+
+    def test_falls_back_to_workbench_when_the_first_render_is_empty(self):
+        module = importlib.import_module("blender_animation")
+        scene, timing = self.scene_one()
+        engines = []
+
+        def fake_check(path):
+            engine = self.bpy.scene.render.engine
+            engines.append(engine)
+            if engine == "BLENDER_WORKBENCH":
+                return 0.4, 0.5
+            return 0.0, 0.0
+
+        with mock.patch.object(module, "check_visible", fake_check):
+            module.render_scene(1, scene, timing, LOOKUP)
+
+        self.assertEqual(
+            engines, ["BLENDER_EEVEE_NEXT", "BLENDER_WORKBENCH"]
+        )
+        frames = os.listdir("output/3dframes/scene_01")
+        self.assertEqual(len(frames), timing["n_frames"])
+
+    def test_no_fallback_when_the_first_render_is_fine(self):
+        module = importlib.import_module("blender_animation")
+        scene, timing = self.scene_one()
+
+        module.render_scene(1, scene, timing, LOOKUP)
+
+        self.assertEqual(self.bpy.scene.render.engine, "BLENDER_EEVEE_NEXT")
+
+    def test_empty_render_in_every_engine_stops_with_a_clear_error(self):
+        module = importlib.import_module("blender_animation")
+        scene, timing = self.scene_one()
+
+        with mock.patch.object(module, "check_visible", lambda p: (0.0, 0.0)):
+            with self.assertRaisesRegex(RuntimeError, "BLACK OR EMPTY"):
+                module.render_scene(1, scene, timing, LOOKUP)
+
+        self.assertFalse(os.path.exists("output/3dframes/scene_01/frame_0001.png"))
+
+
+class VoiceRetryTests(unittest.TestCase):
+    """gTTS is a free web service: retries must work without real network."""
+
+    def fake_gtts_module(self, fail_times):
+        calls = {"count": 0}
+
+        class FakeGTTS:
+            def __init__(self, text, lang):
+                self.text = text
+
+            def save(self, path):
+                calls["count"] += 1
+                if calls["count"] <= fail_times:
+                    raise ConnectionError("429 Too Many Requests")
+                with open(path, "wb") as f:
+                    f.write(b"x" * 2000)
+
+        module = types.ModuleType("gtts")
+        module.gTTS = FakeGTTS
+        return module, calls
+
+    def test_retries_then_succeeds(self):
+        import render_video
+
+        module, calls = self.fake_gtts_module(fail_times=2)
+        folder = tempfile.mkdtemp()
+
+        with mock.patch.dict(sys.modules, {"gtts": module}), \
+                mock.patch("time.sleep") as sleep:
+            render_video.tts_to_file("नमस्ते", os.path.join(folder, "a.mp3"))
+
+        shutil.rmtree(folder, ignore_errors=True)
+        self.assertEqual(calls["count"], 3)
+        self.assertGreaterEqual(sleep.call_count, 3)
+
+    def test_gives_up_with_a_clear_error(self):
+        import render_video
+
+        module, calls = self.fake_gtts_module(fail_times=99)
+        folder = tempfile.mkdtemp()
+
+        with mock.patch.dict(sys.modules, {"gtts": module}), \
+                mock.patch("time.sleep"):
+            with self.assertRaisesRegex(RuntimeError, "Voice generation failed"):
+                render_video.tts_to_file(
+                    "नमस्ते", os.path.join(folder, "a.mp3"), attempts=3
+                )
+
+        shutil.rmtree(folder, ignore_errors=True)
+        self.assertEqual(calls["count"], 3)
 
 
 if __name__ == "__main__":

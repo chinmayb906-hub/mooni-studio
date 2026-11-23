@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 import time
 
 from mooni_common import (
@@ -9,6 +10,7 @@ from mooni_common import (
     MAX_SCENES,
     NARRATOR,
     OUTPUT_DIR,
+    call_with_deadline,
     canonical_speaker,
     character_lookup,
     load_characters,
@@ -19,6 +21,15 @@ MODELS = [
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite"
 ]
+
+# Give up on a single Gemini request after this long (milliseconds), so one
+# stuck request can never freeze the whole workflow. Writing one short
+# episode normally takes well under 30 seconds.
+REQUEST_TIMEOUT_MS = 75_000
+
+# Second safety net in case the library's own timeout does not fire: give up
+# on a request that has not answered after this many seconds.
+HARD_DEADLINE_SECONDS = REQUEST_TIMEOUT_MS / 1000 + 15
 
 DEFAULT_VISUAL = "Colorful Indian village"
 DEFAULT_QUERY = "Indian village nature"
@@ -167,8 +178,12 @@ def make_client():
         raise RuntimeError("Missing GEMINI_API_KEY repository secret.")
 
     from google import genai
+    from google.genai import types
 
-    return genai.Client(api_key=api_key)
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(timeout=REQUEST_TIMEOUT_MS),
+    )
 
 
 def generate_story(prompt, lookup):
@@ -179,16 +194,21 @@ def generate_story(prompt, lookup):
 
     for model in MODELS:
         for attempt in range(2):
-            try:
-                print(f"Trying {model}, attempt {attempt + 1}")
+            started = time.time()
 
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.9
-                    )
+            try:
+                print(f"Trying {model}, attempt {attempt + 1}", flush=True)
+
+                response = call_with_deadline(
+                    lambda: client.models.generate_content(
+                        model=model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.9
+                        )
+                    ),
+                    HARD_DEADLINE_SECONDS
                 )
 
                 if not response.text:
@@ -201,7 +221,11 @@ def generate_story(prompt, lookup):
 
             except Exception as error:
                 last_error = error
-                print(f"Generation failed: {error}")
+                print(
+                    f"Generation failed after {time.time() - started:.0f}s: "
+                    f"{type(error).__name__}: {error}",
+                    flush=True
+                )
 
                 if attempt == 0:
                     time.sleep(4)
@@ -278,6 +302,11 @@ Return valid JSON only:
 
 
 def main():
+    # Show each message in the workflow log straight away (Python otherwise
+    # holds output back when it is not writing to a screen).
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+
     character_data = load_characters()
     lookup = character_lookup(character_data["characters"])
 

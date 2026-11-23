@@ -23,6 +23,7 @@ from mooni_common import (
     TAIL_SECONDS,
     VIDEO_HEIGHT,
     VIDEO_WIDTH,
+    call_with_deadline,
     character_lookup,
     load_characters,
     normalise_envelope,
@@ -35,6 +36,10 @@ FALLBACK_LINE = "आइए एक नई कहानी सुनते है�
 
 # Seconds to wait after each successful voice request (be gentle with gTTS).
 PAUSE_BETWEEN_VOICE_REQUESTS = 0.6
+
+# Give up on one voice request after this many seconds (and retry), so a
+# request that never answers can not freeze the workflow.
+VOICE_DEADLINE_SECONDS = 45
 
 
 def run(command, timeout=300):
@@ -173,7 +178,10 @@ def tts_to_file(text, path, attempts=4):
 
     for attempt in range(attempts):
         try:
-            gTTS(text=text, lang="hi").save(path)
+            call_with_deadline(
+                lambda: gTTS(text=text, lang="hi").save(path),
+                VOICE_DEADLINE_SECONDS
+            )
 
             if os.path.exists(path) and os.path.getsize(path) >= 1000:
                 time.sleep(PAUSE_BETWEEN_VOICE_REQUESTS)
@@ -183,7 +191,11 @@ def tts_to_file(text, path, attempts=4):
 
         except Exception as error:
             last_error = error
-            print(f"Voice attempt {attempt + 1} failed: {error}")
+            print(
+                f"Voice attempt {attempt + 1} failed: "
+                f"{type(error).__name__}: {error}",
+                flush=True
+            )
 
             if attempt < attempts - 1:
                 time.sleep(3 * (attempt + 1))
@@ -580,6 +592,10 @@ def finalize_video():
 
 
 if __name__ == "__main__":
+    # Show each message in the workflow log straight away.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
 
     if mode == "voice":

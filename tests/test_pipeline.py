@@ -15,6 +15,8 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 import wave
@@ -287,6 +289,154 @@ class StudioTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=True):
             with self.assertRaisesRegex(RuntimeError, "GEMINI_API_KEY"):
                 studio.make_client()
+
+    def fake_google(self, client_class):
+        """Fake `google.genai` so no real package, key or network is needed."""
+
+        class HttpOptions:
+            def __init__(self, timeout=None):
+                self.timeout = timeout
+
+        class GenerateContentConfig:
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        genai = types.ModuleType("google.genai")
+        genai.Client = client_class
+        genai.types = types.SimpleNamespace(
+            HttpOptions=HttpOptions,
+            GenerateContentConfig=GenerateContentConfig,
+        )
+
+        google = types.ModuleType("google")
+        google.genai = genai
+
+        return {
+            "google": google,
+            "google.genai": genai,
+            "google.genai.types": genai.types,
+        }
+
+    def test_gemini_requests_have_a_timeout(self):
+        # A request with no time limit once froze the workflow for 50 minutes.
+        seen = {}
+
+        class FakeClient:
+            def __init__(self, api_key, http_options):
+                seen["key"] = api_key
+                seen["timeout"] = http_options.timeout
+
+        with mock.patch.dict(os.environ, {"GEMINI_API_KEY": "k"}), \
+                mock.patch.dict(sys.modules, self.fake_google(FakeClient)):
+            studio.make_client()
+
+        self.assertEqual(seen["key"], "k")
+        self.assertEqual(seen["timeout"], studio.REQUEST_TIMEOUT_MS)
+        self.assertTrue(0 < studio.REQUEST_TIMEOUT_MS <= 120_000)
+
+    def story_client(self, behaviours):
+        """A fake client whose calls follow `behaviours` (error or text)."""
+        calls = []
+
+        class Models:
+            def generate_content(self, model, contents, config):
+                calls.append(model)
+                result = behaviours[len(calls) - 1]
+                if isinstance(result, Exception):
+                    raise result
+                return types.SimpleNamespace(text=result)
+
+        client = types.SimpleNamespace(models=Models())
+        return client, calls
+
+    def good_story(self):
+        return json.dumps({
+            "title": "T",
+            "scenes": [{
+                "characters": ["Golu", "Tara"],
+                "narration": "एक दिन",
+                "dialogue": [{"speaker": "Golu", "text": "चलो"}],
+            }],
+        }, ensure_ascii=False)
+
+    def test_story_falls_back_to_the_next_model_after_a_timeout(self):
+        client, calls = self.story_client([
+            TimeoutError("timed out"), TimeoutError("timed out"),
+            self.good_story(),
+        ])
+
+        with mock.patch.dict(sys.modules, self.fake_google(None)), \
+                mock.patch.object(studio, "make_client", lambda: client), \
+                mock.patch("time.sleep"):
+            episode = studio.generate_story("prompt", LOOKUP)
+
+        self.assertEqual(calls, [studio.MODELS[0]] * 2 + [studio.MODELS[1]])
+        self.assertEqual(episode["scenes"][0]["characters"], ["Golu", "Tara"])
+
+    def test_a_request_that_never_answers_is_abandoned(self):
+        # The real failure: Gemini never replied and the run hung for 50
+        # minutes. The deadline must cut such a request off.
+        forever = threading.Event()
+        started = time.time()
+
+        with self.assertRaisesRegex(TimeoutError, "no answer"):
+            studio.call_with_deadline(forever.wait, 0.3)
+
+        self.assertLess(time.time() - started, 3)
+
+    def test_call_with_deadline_passes_results_and_errors_through(self):
+        self.assertEqual(studio.call_with_deadline(lambda: 42, 5), 42)
+
+        def boom():
+            raise ValueError("bad")
+
+        with self.assertRaisesRegex(ValueError, "bad"):
+            studio.call_with_deadline(boom, 5)
+
+    def test_story_moves_on_when_a_model_never_answers(self):
+        forever = threading.Event()
+        calls = []
+
+        class Models:
+            def generate_content(self, model, contents, config):
+                calls.append(model)
+                if len(calls) <= 2:
+                    forever.wait()  # first model hangs on both attempts
+                return types.SimpleNamespace(text=json.dumps({
+                    "scenes": [{
+                        "characters": ["Golu"],
+                        "narration": "एक दिन",
+                        "dialogue": [],
+                    }],
+                }, ensure_ascii=False))
+
+        client = types.SimpleNamespace(models=Models())
+        started = time.time()
+
+        with mock.patch.dict(sys.modules, self.fake_google(None)), \
+                mock.patch.object(studio, "make_client", lambda: client), \
+                mock.patch.object(studio, "HARD_DEADLINE_SECONDS", 0.3), \
+                mock.patch("time.sleep"):
+            episode = studio.generate_story("prompt", LOOKUP)
+
+        self.assertEqual(calls[2], studio.MODELS[1])
+        self.assertEqual(len(episode["scenes"]), 1)
+        self.assertLess(time.time() - started, 5)
+
+    def test_story_gives_a_clear_error_when_every_model_fails(self):
+        client, calls = self.story_client(
+            [TimeoutError("timed out")] * (len(studio.MODELS) * 2)
+        )
+
+        with mock.patch.dict(sys.modules, self.fake_google(None)), \
+                mock.patch.object(studio, "make_client", lambda: client), \
+                mock.patch("time.sleep"):
+            with self.assertRaisesRegex(
+                RuntimeError, "All story generation attempts failed"
+            ):
+                studio.generate_story("prompt", LOOKUP)
+
+        self.assertEqual(len(calls), len(studio.MODELS) * 2)
 
 
 class PixabayTests(unittest.TestCase):
@@ -807,6 +957,37 @@ class VoiceRetryTests(unittest.TestCase):
         shutil.rmtree(folder, ignore_errors=True)
         self.assertEqual(calls["count"], 3)
         self.assertGreaterEqual(sleep.call_count, 3)
+
+    def test_a_voice_request_that_never_answers_is_retried(self):
+        import render_video
+
+        hang = threading.Event()
+        calls = {"count": 0}
+
+        class FakeGTTS:
+            def __init__(self, text, lang):
+                pass
+
+            def save(self, path):
+                calls["count"] += 1
+                if calls["count"] == 1:
+                    hang.wait()  # the first request never replies
+                with open(path, "wb") as f:
+                    f.write(b"x" * 2000)
+
+        module = types.ModuleType("gtts")
+        module.gTTS = FakeGTTS
+        folder = tempfile.mkdtemp()
+        started = time.time()
+
+        with mock.patch.dict(sys.modules, {"gtts": module}), \
+                mock.patch.object(render_video, "VOICE_DEADLINE_SECONDS", 0.3), \
+                mock.patch("time.sleep"):
+            render_video.tts_to_file("नमस्ते", os.path.join(folder, "a.mp3"))
+
+        shutil.rmtree(folder, ignore_errors=True)
+        self.assertEqual(calls["count"], 2)
+        self.assertLess(time.time() - started, 5)
 
     def test_gives_up_with_a_clear_error(self):
         import render_video

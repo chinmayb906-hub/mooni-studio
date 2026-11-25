@@ -1,8 +1,9 @@
-
 name: Mooni Studio Lip Sync Episode Generator
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: "30 1 * * *"
 
 permissions:
   contents: read
@@ -97,15 +98,4 @@ jobs:
 
       - name: Save Mooni Studio output
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: mooni-studio-lipsync-episode
-          if-no-files-found: warn
-          retention-days: 7
-          path: |
-            output/episode.json
-            output/mooni_episode.mp4
-            output/voice/
-            output/3dframes/
-            output/clips/
-            output/scenes/
+        uses: actions/upload-ar

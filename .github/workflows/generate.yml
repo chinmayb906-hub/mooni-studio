@@ -98,4 +98,12 @@ jobs:
 
       - name: Save Mooni Studio output
         if: always()
-        uses: actions/upload-ar
+        uses: actions/upload-artifact@v4
+        with:
+          name: mooni-studio-lipsync-episode
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            output/episode.json
+            output/mooni_episode.mp4
+            output/3dframes/debug_scene_*.png

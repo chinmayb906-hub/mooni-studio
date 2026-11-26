@@ -566,17 +566,16 @@ def clear_scene():
 def setup(n_frames):
     scene = bpy.context.scene
 
-    available = [
-        e.identifier
-        for e in scene.render.bl_rna.properties["engine"].enum_items
-    ]
+    # Workbench is fast on machines without a graphics card (such as
+    # GitHub's). EEVEE took about 10 seconds per frame there.
+    scene.render.engine = "BLENDER_WORKBENCH"
+    scene.display.shading.light = "STUDIO"
+    scene.display.shading.color_type = "MATERIAL"
 
-    if "BLENDER_EEVEE_NEXT" in available:
-        scene.render.engine = "BLENDER_EEVEE_NEXT"
-    elif "BLENDER_EEVEE" in available:
-        scene.render.engine = "BLENDER_EEVEE"
-    else:
-        raise RuntimeError("No supported EEVEE engine: " + str(available))
+    try:
+        scene.display.render_aa = "8"
+    except (AttributeError, TypeError):
+        pass
 
     scene.render.resolution_x = VIDEO_WIDTH
     scene.render.resolution_y = VIDEO_HEIGHT

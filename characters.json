@@ -48,7 +48,9 @@
         "fur": "#F4EDE2",
         "fur_secondary": "#8B5A2B",
         "accent": "#D42A2A",
-        "extras": ["collar"],
+        "extras": [
+          "collar"
+        ],
         "pitch": 1.38
       }
     },
@@ -85,7 +87,9 @@
         "bottom": "#C8A878",
         "accent": "#3A8F3A",
         "legs": "long",
-        "extras": ["jacket"],
+        "extras": [
+          "jacket"
+        ],
         "pitch": 1.05
       }
     },
@@ -104,7 +108,9 @@
         "bottom": "#1ABC9C",
         "accent": "#FFD400",
         "legs": "long",
-        "extras": ["hairband"],
+        "extras": [
+          "hairband"
+        ],
         "pitch": 1.22
       }
     },
@@ -119,7 +125,9 @@
         "fur": "#E8771E",
         "fur_secondary": "#FFF1D6",
         "accent": "#2A6FDB",
-        "extras": ["neckerchief"],
+        "extras": [
+          "neckerchief"
+        ],
         "pitch": 1.35
       }
     },
@@ -135,7 +143,9 @@
         "fur_secondary": "#1B7F2A",
         "beak": "#FFC21A",
         "accent": "#FFD34D",
-        "extras": ["satchel"],
+        "extras": [
+          "satchel"
+        ],
         "pitch": 1.45
       }
     },
@@ -154,8 +164,28 @@
         "bottom": "#F3E7C8",
         "accent": "#F3E7C8",
         "legs": "long",
-        "extras": ["moustache", "glasses", "waistcoat"],
+        "extras": [
+          "moustache",
+          "glasses",
+          "waistcoat"
+        ],
         "pitch": 0.78
+      }
+    },
+    {
+      "name": "Mooni",
+      "age": 1,
+      "appearance": "Tiny glowing cream crescent-moon creature the size of an apple, big round dark eyes and a small gold star-shaped tail that glows brighter when she is happy",
+      "personality": "Gentle, curious and magical; never speaks, she helps only by glowing and soft chimes",
+      "mascot": true,
+      "silent": true,
+      "design": {
+        "kind": "moon",
+        "height": 0.7,
+        "fur": "#FFF1CF",
+        "accent": "#FFC93C",
+        "lift": 1.4,
+        "pitch": 1.5
       }
     }
   ]

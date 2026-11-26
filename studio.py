@@ -5,6 +5,7 @@ import sys
 import time
 
 from mooni_common import (
+    LANGUAGES,
     MAX_CHARACTERS_PER_SCENE,
     MAX_DIALOGUE_LINES,
     MAX_SCENES,
@@ -14,12 +15,15 @@ from mooni_common import (
     canonical_speaker,
     character_lookup,
     load_characters,
+    normalise_language,
 )
 
+# Tried in this order; if one is busy or unavailable the next one is used.
 MODELS = [
     "gemini-3.8-flash",
     "gemini-3.6-flash",
-    "gemini-3.5-flash-lite"
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite"
 ]
 
 # Give up on a single Gemini request after this long (milliseconds), so one
@@ -65,6 +69,8 @@ def validate_episode(data, lookup):
     - every speaker is a known character or Narrator
     - every scene has 1..MAX_CHARACTERS_PER_SCENE known on-screen characters
     - every scene has some spoken text
+    - "silent" characters (Mooni) never get dialogue lines
+    - "mascot" characters (Mooni) are on screen in every scene
     """
     if not isinstance(data, dict):
         raise ValueError("Episode must be a JSON object.")
@@ -74,9 +80,13 @@ def validate_episode(data, lookup):
     if not isinstance(scenes, list) or not scenes:
         raise ValueError("No scenes found.")
 
+    silent = {c["name"] for c in lookup.values() if c.get("silent")}
+    mascots = [c["name"] for c in lookup.values() if c.get("mascot")]
+
     default_names = [
-        c["name"] for c in list(lookup.values())[:2]
-    ]
+        c["name"] for c in lookup.values()
+        if c["name"] not in silent and c["name"] not in mascots
+    ][:2]
 
     cleaned = []
 
@@ -107,6 +117,9 @@ def validate_episode(data, lookup):
                 continue
 
             speaker = canonical_speaker(line.get("speaker"), lookup)
+
+            if speaker in silent:
+                continue
 
             dialogue.append({
                 "speaker": speaker or NARRATOR,
@@ -143,6 +156,24 @@ def validate_episode(data, lookup):
 
         if not names:
             names = list(default_names)
+
+        speakers = {line["speaker"] for line in dialogue}
+
+        for mascot in mascots:
+            if mascot in names:
+                continue
+
+            if len(names) >= MAX_CHARACTERS_PER_SCENE:
+                # Make room by dropping the last character who is not
+                # speaking; if everyone speaks, the mascot sits this one out.
+                quiet = [n for n in names if n not in speakers]
+
+                if not quiet:
+                    continue
+
+                names.remove(quiet[-1])
+
+            names.append(mascot)
 
         cleaned.append({
             "scene": number,
@@ -235,8 +266,10 @@ def generate_story(prompt, lookup):
     )
 
 
-def build_prompt(character_data):
+def build_prompt(character_data, language="hindi"):
     characters = character_data["characters"]
+    language = normalise_language(language)
+    label = LANGUAGES[language]["label"]
 
     character_details = "\n".join(
         f'{c["name"]}: {c["appearance"]}. '
@@ -244,7 +277,14 @@ def build_prompt(character_data):
         for c in characters
     )
 
-    names = ", ".join(c["name"] for c in characters)
+    names = ", ".join(c["name"] for c in characters if not c.get("silent"))
+
+    mascot_rules = "\n".join(
+        f'- {c["name"]} is in every scene but NEVER speaks: give her no '
+        "dialogue lines and no narration quotes. She helps only by "
+        "glowing, and the story shows what she does."
+        for c in characters if c.get("silent")
+    )
 
     return f"""
 Create an ORIGINAL high-quality children's cartoon episode.
@@ -256,15 +296,16 @@ CHARACTERS:
 {character_details}
 
 RULES:
-- Write the story in simple Hindi using Devanagari.
+- {LANGUAGES[language]["rule"]}
 - Use no more than {MAX_SCENES} scenes.
-- Use between 2 and {MAX_CHARACTERS_PER_SCENE} characters in every scene, and at least 3 different characters in the whole episode.
-- Include a funny, magical or educational adventure.
+- Use between 2 and {MAX_CHARACTERS_PER_SCENE} characters in every scene, and at least 3 different speaking characters in the whole episode.
+- Tell a realistic everyday-life story (a small problem that could really happen: a lost key, a rainy day, helping a neighbour, a birthday) with one gentle touch of magic.
+{mascot_rules}
 - Keep character appearances consistent.
 - Every scene must have English visual descriptions.
 - Every scene must have an English stock video search query of 2 to 4 plain English words (a calm background such as a village, garden, river or sky; no people closeups).
-- Every scene must have short Hindi narration (at most 25 words).
-- Use separate speaker-labelled dialogue: 2 to {MAX_DIALOGUE_LINES} short lines per scene, each at most 15 words.
+- Every scene must have short {label} narration (at most 25 words).
+- Use separate speaker-labelled dialogue: 2 to {MAX_DIALOGUE_LINES} short lines per scene, each at most 15 words, in {label}.
 - The "speaker" of each dialogue line must be exactly one of: {names}, or Narrator.
 - Every character who speaks must also be listed in that scene's "characters".
 - Give a meaningful happy ending.
@@ -284,21 +325,55 @@ Return valid JSON only:
       "characters": ["Golu", "Tara"],
       "visual": "Detailed English visual description",
       "stock_query": "village children playing",
-      "narration": "Hindi narration",
+      "narration": "{label} narration",
       "dialogue": [
         {{
           "speaker": "Golu",
-          "text": "Hindi dialogue"
+          "text": "{label} dialogue"
         }},
         {{
           "speaker": "Tara",
-          "text": "Hindi dialogue"
+          "text": "{label} dialogue"
         }}
       ]
     }}
   ]
 }}
 """
+
+
+def parse_episode_number(value):
+    """Episode number from the EPISODE_NUMBER setting, or None."""
+    try:
+        number = int(str(value or "").strip())
+    except ValueError:
+        return None
+
+    return number if number > 0 else None
+
+
+def upload_text(episode):
+    """Ready-to-paste YouTube title, description and tags for an episode."""
+    number = episode.get("number")
+    label = LANGUAGES[normalise_language(episode.get("language"))]["label"]
+
+    head = f"Mooni Ep {number}" if number else "Mooni"
+    title = f'{episode["title"]} | {head}'
+
+    if len(title) > 100:
+        title = title[:99].rstrip() + "…"
+
+    tags = ["#Shorts", "#Mooni", "#KidsStory", "#Cartoon", "#" + label]
+
+    return (
+        f"TITLE:\n{title}\n\n"
+        f"DESCRIPTION:\n{episode['description']}\n\n"
+        f"Mooni, the tiny glowing moon, helps in everyday stories. "
+        f"New episode every day! ({label})\n\n"
+        f"{' '.join(tags)}\n\n"
+        "BEFORE YOU PUBLISH ON YOUTUBE:\n"
+        'Choose "Yes, it\'s made for kids" under Audience.\n'
+    )
 
 
 def main():
@@ -310,7 +385,17 @@ def main():
     character_data = load_characters()
     lookup = character_lookup(character_data["characters"])
 
-    episode = generate_story(build_prompt(character_data), lookup)
+    language = normalise_language(os.getenv("STORY_LANGUAGE"))
+    number = parse_episode_number(os.getenv("EPISODE_NUMBER"))
+
+    print("Language:", LANGUAGES[language]["label"])
+
+    episode = generate_story(build_prompt(character_data, language), lookup)
+
+    episode["language"] = language
+
+    if number:
+        episode["number"] = number
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -320,6 +405,13 @@ def main():
         encoding="utf-8"
     ) as f:
         json.dump(episode, f, ensure_ascii=False, indent=2)
+
+    with open(
+        OUTPUT_DIR + "/upload_info.txt",
+        "w",
+        encoding="utf-8"
+    ) as f:
+        f.write(upload_text(episode))
 
     print("Episode generated:", episode["title"])
     print("Scenes:", len(episode["scenes"]))

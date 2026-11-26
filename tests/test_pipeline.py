@@ -883,34 +883,32 @@ class BlenderScriptDryRun(unittest.TestCase):
             scene = json.load(f)["scenes"][0]
         return scene, timing
 
-    def test_falls_back_to_workbench_when_the_first_render_is_empty(self):
+    def test_retries_once_when_the_first_render_is_empty(self):
         module = importlib.import_module("blender_animation")
         scene, timing = self.scene_one()
+        results = [(0.0, 0.0), (0.4, 0.5)]
         engines = []
 
         def fake_check(path):
-            engine = self.bpy.scene.render.engine
-            engines.append(engine)
-            if engine == "BLENDER_WORKBENCH":
-                return 0.4, 0.5
-            return 0.0, 0.0
+            engines.append(self.bpy.scene.render.engine)
+            return results.pop(0)
 
         with mock.patch.object(module, "check_visible", fake_check):
             module.render_scene(1, scene, timing, LOOKUP)
 
         self.assertEqual(
-            engines, ["BLENDER_EEVEE_NEXT", "BLENDER_WORKBENCH"]
+            engines, ["BLENDER_WORKBENCH", "BLENDER_WORKBENCH"]
         )
         frames = os.listdir("output/3dframes/scene_01")
         self.assertEqual(len(frames), timing["n_frames"])
 
-    def test_no_fallback_when_the_first_render_is_fine(self):
+    def test_uses_the_fast_workbench_renderer(self):
         module = importlib.import_module("blender_animation")
         scene, timing = self.scene_one()
 
         module.render_scene(1, scene, timing, LOOKUP)
 
-        self.assertEqual(self.bpy.scene.render.engine, "BLENDER_EEVEE_NEXT")
+        self.assertEqual(self.bpy.scene.render.engine, "BLENDER_WORKBENCH")
 
     def test_empty_render_in_every_engine_stops_with_a_clear_error(self):
         module = importlib.import_module("blender_animation")

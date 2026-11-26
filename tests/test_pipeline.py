@@ -104,7 +104,9 @@ class CommonTests(unittest.TestCase):
     def test_every_character_has_a_valid_design(self):
         for character in CHARACTERS["characters"]:
             design = character["design"]
-            self.assertIn(design["kind"], ("human", "dog", "fox", "parrot"))
+            self.assertIn(
+                design["kind"], ("human", "dog", "fox", "parrot", "moon")
+            )
             self.assertTrue(0.75 <= design["pitch"] <= 1.5)
 
             colours = [
@@ -221,7 +223,8 @@ class StudioTests(unittest.TestCase):
         result = studio.validate_episode(self.episode(), LOOKUP)
         scene = result["scenes"][0]
         self.assertEqual(scene["scene"], 1)
-        self.assertEqual(scene["characters"], ["Golu", "Tara"])
+        # Mooni (the mascot) is added to every scene.
+        self.assertEqual(scene["characters"], ["Golu", "Tara", "Mooni"])
         self.assertEqual(scene["stock_query"], "village children playing")
         self.assertEqual(len(scene["dialogue"]), 2)
 
@@ -249,7 +252,88 @@ class StudioTests(unittest.TestCase):
     def test_missing_cast_falls_back_to_defaults(self):
         data = self.episode(characters=[], dialogue=[])
         scene = studio.validate_episode(data, LOOKUP)["scenes"][0]
-        self.assertEqual(len(scene["characters"]), 2)
+        self.assertEqual(scene["characters"], ["Golu", "Tara", "Mooni"])
+
+    def test_mooni_never_speaks_but_is_in_every_scene(self):
+        data = self.episode(
+            characters=["Golu"],
+            dialogue=[
+                {"speaker": "Mooni", "text": "मैं बोल रही हूँ"},
+                {"speaker": "Golu", "text": "चलो"},
+            ],
+        )
+        scene = studio.validate_episode(data, LOOKUP)["scenes"][0]
+        speakers = [line["speaker"] for line in scene["dialogue"]]
+        self.assertEqual(speakers, ["Golu"])
+        self.assertIn("Mooni", scene["characters"])
+
+    def test_mooni_takes_a_place_from_a_quiet_character_when_full(self):
+        data = self.episode(
+            characters=["Golu", "Tara", "Moti", "Dadi"],
+            dialogue=[{"speaker": "Golu", "text": "चलो"}],
+        )
+        scene = studio.validate_episode(data, LOOKUP)["scenes"][0]
+        self.assertEqual(len(scene["characters"]), common.MAX_CHARACTERS_PER_SCENE)
+        self.assertIn("Mooni", scene["characters"])
+        self.assertIn("Golu", scene["characters"])  # speakers always stay
+
+    def test_mooni_sits_out_when_four_characters_all_speak(self):
+        names = ["Golu", "Tara", "Moti", "Dadi"]
+        data = self.episode(
+            characters=names,
+            dialogue=[{"speaker": n, "text": "हाँ"} for n in names],
+        )
+        scene = studio.validate_episode(data, LOOKUP)["scenes"][0]
+        self.assertEqual(scene["characters"], names)
+
+    def test_language_is_chosen_and_checked(self):
+        self.assertEqual(common.normalise_language(""), "hindi")
+        self.assertEqual(common.normalise_language(None), "hindi")
+        self.assertEqual(common.normalise_language("HI"), "hindi")
+        self.assertEqual(common.normalise_language("en"), "english")
+        self.assertEqual(common.normalise_language(" Hinglish "), "hinglish")
+        with self.assertRaises(ValueError):
+            common.normalise_language("klingon")
+
+    def test_prompt_follows_the_chosen_language(self):
+        english = studio.build_prompt(CHARACTERS, "english")
+        hindi = studio.build_prompt(CHARACTERS, "hindi")
+        hinglish = studio.build_prompt(CHARACTERS, "hinglish")
+        self.assertIn("simple, clear English", english)
+        self.assertNotIn("Devanagari", english)
+        self.assertIn("simple Hindi using Devanagari", hindi)
+        self.assertIn("Hinglish", hinglish)
+        self.assertIn("Devanagari", hinglish)
+
+    def test_prompt_keeps_mooni_silent(self):
+        prompt = studio.build_prompt(CHARACTERS)
+        self.assertIn("Mooni is in every scene but NEVER speaks", prompt)
+        # Mooni is not offered as a speaker.
+        speakers = prompt.split('exactly one of: ')[1].split('\n')[0]
+        self.assertNotIn("Mooni", speakers)
+
+    def test_episode_number_and_upload_text(self):
+        self.assertEqual(studio.parse_episode_number("7"), 7)
+        self.assertIsNone(studio.parse_episode_number(""))
+        self.assertIsNone(studio.parse_episode_number("abc"))
+        self.assertIsNone(studio.parse_episode_number("0"))
+
+        episode = {
+            "title": "खोई चाबी",
+            "description": "एक छोटी कहानी",
+            "language": "hinglish",
+            "number": 12,
+        }
+        text = studio.upload_text(episode)
+        self.assertIn("खोई चाबी | Mooni Ep 12", text)
+        self.assertIn("#Shorts", text)
+        self.assertIn("#Hinglish", text)
+        self.assertIn("made for kids", text)
+
+        long_title = studio.upload_text(
+            {"title": "क" * 200, "description": "d"}
+        )
+        self.assertLessEqual(len(long_title.split("\n")[1]), 100)
 
     def test_dialogue_as_string_and_bad_lines(self):
         data = self.episode(dialogue="सिर्फ़ एक पंक्ति")
@@ -371,7 +455,9 @@ class StudioTests(unittest.TestCase):
             episode = studio.generate_story("prompt", LOOKUP)
 
         self.assertEqual(calls, [studio.MODELS[0]] * 2 + [studio.MODELS[1]])
-        self.assertEqual(episode["scenes"][0]["characters"], ["Golu", "Tara"])
+        self.assertEqual(
+            episode["scenes"][0]["characters"], ["Golu", "Tara", "Mooni"]
+        )
 
     def test_a_request_that_never_answers_is_abandoned(self):
         # The real failure: Gemini never replied and the run hung for 50
@@ -558,6 +644,29 @@ class VideoPipelineTests(unittest.TestCase):
             [s["speaker"] for s in self.timing(2)["segments"]],
             ["Dadi", "Bholu"],
         )
+
+    def test_voice_language_follows_the_episode(self):
+        seen = []
+
+        def spy(text, path, attempts=4, lang="hi"):
+            seen.append(lang)
+            fake_tts(text, path)
+
+        for language, code in (
+            ("english", "en"), ("hinglish", "hi"), ("hindi", "hi"),
+        ):
+            self.episode["language"] = language
+
+            with open("output/episode.json", "w", encoding="utf-8") as f:
+                json.dump(self.episode, f, ensure_ascii=False)
+
+            del seen[:]
+
+            with mock.patch.object(self.rv, "tts_to_file", spy):
+                self.rv.generate_voices()
+
+            self.assertTrue(seen, language)
+            self.assertEqual(set(seen), {code}, language)
 
     def test_speech_envelope_is_loud_only_while_someone_talks(self):
         self.make_voices()
@@ -876,6 +985,25 @@ class BlenderScriptDryRun(unittest.TestCase):
             self.assertIsNotNone(actor.mouth, character["name"])
             self.assertEqual(len(actor.eyes), 4, character["name"])
 
+    def test_mooni_floats_above_the_ground(self):
+        import random
+
+        module = importlib.import_module("blender_animation")
+        actor = module.build_actor("Mooni", LOOKUP["mooni"]["design"], 0.0, 1.0)
+
+        self.assertGreater(actor.lift, 1.0)
+        names = [o.name for o in self.bpy.objects]
+        self.assertTrue(any(n.startswith("Mooni_Crescent") for n in names))
+        self.assertTrue(any(n.startswith("Mooni_StarPoint") for n in names))
+
+        module.animate_actor(actor, 0.0, 0.7, [0.0] * 5, 5, random.Random(1))
+        heights = [
+            value[2] for path, _, value in actor.root.keys
+            if path == "location"
+        ]
+        self.assertTrue(heights)
+        self.assertTrue(all(h > actor.lift - 0.1 for h in heights))
+
     def scene_one(self):
         with open("output/voice/scene_01.json") as f:
             timing = json.load(f)
@@ -986,6 +1114,33 @@ class VoiceRetryTests(unittest.TestCase):
         shutil.rmtree(folder, ignore_errors=True)
         self.assertEqual(calls["count"], 2)
         self.assertLess(time.time() - started, 5)
+
+    def test_language_is_passed_to_gtts(self):
+        import render_video
+
+        seen = []
+
+        class FakeGTTS:
+            def __init__(self, text, lang):
+                seen.append(lang)
+
+            def save(self, path):
+                with open(path, "wb") as f:
+                    f.write(b"x" * 2000)
+
+        module = types.ModuleType("gtts")
+        module.gTTS = FakeGTTS
+        folder = tempfile.mkdtemp()
+
+        with mock.patch.dict(sys.modules, {"gtts": module}), \
+                mock.patch("time.sleep"):
+            render_video.tts_to_file(
+                "hello", os.path.join(folder, "a.mp3"), lang="en"
+            )
+            render_video.tts_to_file("नमस्ते", os.path.join(folder, "b.mp3"))
+
+        shutil.rmtree(folder, ignore_errors=True)
+        self.assertEqual(seen, ["en", "hi"])
 
     def test_gives_up_with_a_clear_error(self):
         import render_video

@@ -1,45 +1,13 @@
-🌙 Mooni Studio — Lip Sync Episode Generator
-Automated children's cartoon story and video generation project.
-
-What it does
-Story (studio.py) — Gemini writes an original Hindi episode (up to 4 scenes) using the cast in characters.json. The result is validated and cleaned: unknown speakers become the Narrator, every scene gets 1–4 known on-screen characters, speakers are always on screen.
-Footage (pixabay.py) — one Pixabay background clip per scene. If a scene has no usable clip, a plain sky-and-grass background is used instead, so a missing clip never stops an episode. A wrong API key does stop the run.
-Voices (render_video.py voice) — every line is spoken separately (Hindi gTTS) and pitch-shifted for its speaker (children higher, Dadi and Uncle Bhola lower). Lines are joined into one audio track per scene, with a timing file that records who speaks when and how loud.
-Characters (blender_animation.py) — Blender builds each character from the design block in characters.json and renders a transparent PNG sequence. Each character's mouth moves only while that character is speaking; characters also blink, bob and sway, and arms or wings move while talking.
-Final video (render_video.py final) — the character frames are composited over the footage, the voice is added, and the scenes are joined into one 720 x 1280 (9:16) MP4.
-Characters
-Golu, Tara, Moti, Dadi, Aarav, Meera, Chiku, Bholu and Uncle Bhola.
-
+🌙 Mooni Studio — Lip Sync Episode Generator Automated children's cartoon story and video generation project. A new numbered episode is made every day at 7:00 AM India time and saved under Releases.
+What it does Story (studio.py) — Gemini writes an original episode (up to 4 scenes) in Hindi, English or Hinglish using the cast in characters.json. The result is validated and cleaned: unknown speakers become the Narrator, every scene gets 2–4 known on-screen characters, speakers are always on screen. Mooni (the glowing moon) is in every scene but never speaks. Footage (pixabay.py) — one Pixabay background clip per scene. If a scene has no usable clip, a plain sky-and-grass background is used instead, so a missing clip never stops an episode. A wrong API key does stop the run. Voices (render_video.py voice) — every line is spoken separately (gTTS: Hindi voice for Hindi and Hinglish, English voice for English) and pitch-shifted for its speaker (children higher, Dadi and Uncle Bhola lower). Lines are joined into one audio track per scene, with a timing file that records who speaks when and how loud. Characters (blender_animation.py) — Blender builds each character from the design block in characters.json and renders a transparent PNG sequence. Each character's mouth moves only while that character is speaking; characters also blink, bob and sway, and arms or wings move while talking. Mooni floats above the ground as a cream crescent with a gold star tail. Final video (render_video.py final) — the character frames are composited over the footage, the voice is added, and the scenes are joined into one 720 x 1280 (9:16) MP4. Publishing (workflow) — the finished video is published as a GitHub Release called "Episode N: ", together with upload_info.txt (a ready-to-paste YouTube title, description and tags). Releases are permanent. The Episodes web page (episodes.html) lists them automatically.
+Characters Golu, Tara, Moti, Dadi, Aarav, Meera, Chiku, Bholu, Uncle Bhola and Mooni.
 Each one is defined in characters.json:
-
-appearance and personality are given to the story writer.
-design controls the 3D model: kind (human, dog, fox, parrot), height, colours (#RRGGBB), hair_style (short, wavy, bun, braids, shoulder), legs (long, shorts, skirt), extras (glasses, moustache, waistcoat, jacket, hairband, collar, neckerchief, satchel) and the voice pitch (0.75–1.5).
-To add a character, add an entry with a design block; no code changes are needed.
-
-Required GitHub Secrets
-GEMINI_API_KEY
-PIXABAY_API_KEY
-How to generate an episode
-Open Actions.
-Select Mooni Studio Lip Sync Episode Generator.
-Click Run workflow.
-Wait for the workflow.
-Open the completed workflow.
-Download the mooni-studio-lipsync-episode artifact.
-Output
-mooni_episode.mp4 — the finished episode
-episode.json — the story
-voice/scene_XX.wav and voice/scene_XX.json — scene audio and lip-sync timing
-scenes/scene_XX.mp4 — each finished scene
-3dframes/debug_scene_XX.png — a still of each scene's characters (check these first if something looks wrong)
-Video format
-720 x 1280 vertical video (YouTube Shorts / Instagram Reels).
-
-Tests
-The tests need no API keys, network or Blender (only FFmpeg):
-
-python -m unittest discover -s tests -v
-They run automatically at the start of every workflow run. They cover story validation, per-speaker voice and timing, per-character lip sync, compositing over footage, and a dry run of the Blender script against a recording stub (tests/bpy_stub.py).
-
-Important
-This engine uses AI-generated stories, text-to-speech voices and stock footage. The characters are simple stylised 3D figures built from basic shapes, not a full character-animation rig, and all voices come from one text-to-speech voice with different pitches.
+appearance and personality are given to the story writer. design controls the 3D model: kind (human, dog, fox, parrot, moon), height, colours (#RRGGBB), hair_style (short, wavy, bun, braids, shoulder), legs (long, shorts, skirt), extras (glasses, moustache, waistcoat, jacket, hairband, collar, neckerchief, satchel) and the voice pitch (0.75–1.5). "silent": true means the character never gets dialogue lines. "mascot": true puts the character in every scene. To add a character, add an entry with a design block; no code changes are needed.
+Required GitHub Secrets GEMINI_API_KEY (free key: https://aistudio.google.com/apikey) PIXABAY_API_KEY (free key: https://pixabay.com/api/docs/) Add them in Settings > Secrets and variables > Actions > New repository secret.
+How to generate an episode Open Actions. Select Mooni Studio Lip Sync Episode Generator. Click Run workflow, pick the language (hindi, english or hinglish) and click the green Run workflow button. Wait for the workflow (about 15–40 minutes). Open the repository's main page and click Releases on the right. The newest "Episode N" has the video (mooni_episode_N.mp4) and upload_info.txt.
+Daily episodes The workflow also runs by itself every day at 7:00 AM India time. Daily runs use Hindi unless you add a repository variable: Settings > Secrets and variables > Actions > Variables > New repository variable, name DEFAULT_LANGUAGE, value hindi, english or hinglish.
+Output (also saved for 14 days under the run's Artifacts) mooni_episode.mp4 — the finished episode episode.json — the story (includes language and episode number) upload_info.txt — YouTube title, description and tags voice/scene_XX.wav and voice/scene_XX.json — scene audio and lip-sync timing scenes/scene_XX.mp4 — each finished scene 3dframes/debug_scene_XX.png — a still of each scene's characters (check these first if something looks wrong) Video format 720 x 1280 vertical video (YouTube Shorts / Instagram Reels).
+Uploading Upload to YouTube or Instagram yourself: download the video from Releases, paste the title and description from upload_info.txt, and on YouTube choose "Yes, it's made for kids".
+Tests The tests need no API keys, network or Blender (only FFmpeg):
+python -m unittest discover -s tests -v They run automatically at the start of every workflow run. They cover story validation, languages, Mooni's rules, per-speaker voice and timing, per-character lip sync, compositing over footage, and a dry run of the Blender script against a recording stub (tests/bpy_stub.py).
+Important This engine uses AI-generated stories, text-to-speech voices and stock footage. The characters are simple stylised 3D figures built from basic shapes, not a full character-animation rig, and all voices come from one text-to-speech voice with different pitches. The Blender step can only be proven by a real run in GitHub Actions, so check the 3dframes/debug_scene_XX.png stills after the first episode.

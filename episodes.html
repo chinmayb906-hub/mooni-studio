@@ -27,6 +27,9 @@
   #result{margin-top:10px;text-align:center}
   #result video{width:100%;max-width:360px;border-radius:12px;margin-bottom:10px}
   .note{font-size:12px;opacity:.7;margin-top:6px}
+  .h2{color:#ffd978;font-size:18px;margin:22px 0 4px}
+  .card video{width:100%;max-width:360px;border-radius:12px;display:block;margin:8px auto}
+  .card a.btn{margin-top:4px}
 </style>
 </head>
 <body>
@@ -55,6 +58,9 @@
     <button class="alt" id="copyPrompts">Copy AI prompts</button>
   </div>
   <div id="story"></div>
+  <h2 class="h2">🎬 New daily episodes</h2>
+  <div id="newEps" class="note">Loading...</div>
+
   <p class="note">Videos are saved as WebM (works best in Chrome). If Instagram does not accept the file, open it in CapCut and export as MP4.</p>
 </div>
 
@@ -674,4 +680,52 @@ $("copyStory").onclick = e => {
 };
 $("copyPrompts").onclick = e => {
   const ep = EPS[epI];
-  const cast = ep.cast.ma
+  const cast = ep.cast.map(c => c.n[0] + " (" + c.k + ")").join(", ");
+  const text = ep.sc.map((s, i) =>
+    "Scene " + (i + 1) + ": " + CHAR + ". Setting: " + BGNAME[s.bg] +
+    ". People: " + cast + ". " + s.l[0] +
+    (s.glow ? " Mooni glows brightly." : "") +
+    " Vertical 9:16, 5 seconds, consistent character design."
+  ).join("\n\n");
+  copyText(text, e.target, "Copy AI prompts");
+};
+
+/* ---------- new daily episodes (made automatically by GitHub) ---------- */
+const REPO = "chinmayb906-hub/mooni-studio";
+
+function loadNew() {
+  const box = $("newEps");
+  fetch("https://api.github.com/repos/" + REPO + "/releases?per_page=20")
+    .then(r => (r.ok ? r.json() : Promise.reject(r.status)))
+    .then(list => {
+      box.innerHTML = "";
+      const eps = list.filter(r => (r.assets || []).some(a => /\.mp4$/i.test(a.name)));
+      if (!eps.length) {
+        box.textContent = "No daily episodes yet. They appear here after the first successful run.";
+        return;
+      }
+      eps.forEach(r => {
+        const asset = r.assets.find(a => /\.mp4$/i.test(a.name));
+        const card = document.createElement("div");
+        card.className = "card";
+        const h = document.createElement("h3");
+        h.textContent = r.name || r.tag_name;
+        const v = document.createElement("video");
+        v.src = asset.browser_download_url;
+        v.controls = true; v.playsInline = true; v.preload = "none";
+        const a = document.createElement("a");
+        a.href = asset.browser_download_url;
+        a.className = "btn"; a.textContent = "⬇ Download";
+        a.setAttribute("download", asset.name);
+        card.append(h, v, a);
+        box.appendChild(card);
+      });
+    })
+    .catch(() => { box.textContent = "Could not load the daily episodes right now."; });
+}
+
+refresh();
+loadNew();
+</script>
+</body>
+</html>

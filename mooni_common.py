@@ -32,6 +32,38 @@ VIEW_HEIGHT = 6.4
 VIEW_WIDTH = VIEW_HEIGHT * VIDEO_WIDTH / VIDEO_HEIGHT
 SLOT_WIDTH = 1.9  # horizontal space one character needs at scale 1.0
 
+# Story languages. "voice" is the gTTS language code that reads the story out.
+# Hinglish is everyday Hindi mixed with English words, written in Devanagari so
+# that the Hindi voice reads it properly.
+DEFAULT_LANGUAGE = "hindi"
+
+LANGUAGES = {
+    "hindi": {
+        "label": "Hindi",
+        "voice": "hi",
+        "rule": "Write the story in simple Hindi using Devanagari.",
+        "fallback": "आइए एक नई कहानी सुनते हैं।",
+    },
+    "english": {
+        "label": "English",
+        "voice": "en",
+        "rule": "Write the story in simple, clear English.",
+        "fallback": "Let us listen to a new story.",
+    },
+    "hinglish": {
+        "label": "Hinglish",
+        "voice": "hi",
+        "rule": (
+            "Write the story in Hinglish: everyday spoken Hindi mixed with "
+            "common English words (school, park, friend, birthday), written "
+            "in Devanagari script so a Hindi voice can read it."
+        ),
+        "fallback": "आइए एक नई story सुनते हैं।",
+    },
+}
+
+_LANGUAGE_ALIASES = {"hi": "hindi", "en": "english"}
+
 _NARRATOR_KEYS = {"", "narrator", "narration", "storyteller"}
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -55,6 +87,23 @@ def load_characters(path=None):
 def character_lookup(characters):
     """Map normalised name -> character dict."""
     return {norm_name(c["name"]): c for c in characters}
+
+
+def normalise_language(value):
+    """Return 'hindi', 'english' or 'hinglish' (empty means the default)."""
+    key = str(value or "").strip().lower()
+
+    if not key:
+        return DEFAULT_LANGUAGE
+
+    key = _LANGUAGE_ALIASES.get(key, key)
+
+    if key not in LANGUAGES:
+        raise ValueError(
+            "Unknown language '%s'. Use hindi, english or hinglish." % value
+        )
+
+    return key
 
 
 def canonical_speaker(name, lookup):

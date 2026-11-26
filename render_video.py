@@ -18,6 +18,7 @@ from mooni_common import (
     AUDIO_RATE,
     FPS,
     GAP_SECONDS,
+    LANGUAGES,
     NARRATOR,
     OUTPUT_DIR,
     TAIL_SECONDS,
@@ -27,6 +28,7 @@ from mooni_common import (
     character_lookup,
     load_characters,
     normalise_envelope,
+    normalise_language,
     rms_envelope,
     segment_frames,
     voice_pitch,
@@ -165,8 +167,8 @@ def check_audio(path):
 # Voice
 # --------------------------------------------------------------------------
 
-def tts_to_file(text, path, attempts=4):
-    """Speak Hindi text with gTTS and save it as an MP3.
+def tts_to_file(text, path, attempts=4, lang="hi"):
+    """Speak text with gTTS (Hindi by default) and save it as an MP3.
 
     The free gTTS service can refuse requests that arrive too quickly (HTTP
     429), especially from cloud machines, so each success is followed by a
@@ -179,7 +181,7 @@ def tts_to_file(text, path, attempts=4):
     for attempt in range(attempts):
         try:
             call_with_deadline(
-                lambda: gTTS(text=text, lang="hi").save(path),
+                lambda: gTTS(text=text, lang=lang).save(path),
                 VOICE_DEADLINE_SECONDS
             )
 
@@ -247,7 +249,7 @@ def read_pcm(path):
         return audio.readframes(audio.getnframes())
 
 
-def scene_speech(scene):
+def scene_speech(scene, fallback=FALLBACK_LINE):
     """Ordered list of (speaker, text) for one scene."""
     specs = []
 
@@ -266,7 +268,7 @@ def scene_speech(scene):
             specs.append((line.get("speaker") or NARRATOR, text))
 
     if not specs:
-        specs.append((NARRATOR, FALLBACK_LINE))
+        specs.append((NARRATOR, fallback))
 
     return specs
 
@@ -353,7 +355,7 @@ def build_scene_audio(index, specs, lookup, voice_dir, tts=tts_to_file):
     return timing
 
 
-def generate_voices(tts=tts_to_file):
+def generate_voices(tts=None):
     episode_path = OUTPUT_DIR + "/episode.json"
 
     if not os.path.exists(episode_path):
@@ -367,6 +369,16 @@ def generate_voices(tts=tts_to_file):
     if not scenes:
         raise RuntimeError("Episode contains no scenes.")
 
+    # The story's language decides which voice reads it (Hindi when the
+    # episode does not say, as in older episode files).
+    language = LANGUAGES[normalise_language(episode.get("language"))]
+
+    if tts is None:
+        def tts(text, path):
+            tts_to_file(text, path, lang=language["voice"])
+
+    print("Voice language:", language["label"])
+
     lookup = character_lookup(load_characters()["characters"])
 
     voice_dir = OUTPUT_DIR + "/voice"
@@ -376,7 +388,9 @@ def generate_voices(tts=tts_to_file):
         print("Generating voices for scene:", i)
 
         timing = build_scene_audio(
-            i, scene_speech(scene), lookup, voice_dir, tts
+            i,
+            scene_speech(scene, language["fallback"]),
+            lookup, voice_dir, tts
         )
 
         print(

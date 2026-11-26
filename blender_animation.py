@@ -173,6 +173,7 @@ class Actor:
         self.mouth_gain = 0.17
         self.eyes = []   # (object, rest scale)
         self.limbs = []  # (object, side, rest angle, gain)
+        self.lift = 0.0  # height above the ground (for floating characters)
 
 
 def make_root(name, x, scale):
@@ -454,9 +455,67 @@ def build_parrot(name, d, root):
     return actor
 
 
+def build_moon(name, d, root):
+    """Mooni: a floating cream crescent with a face and a gold star tail.
+
+    The crescent is a row of overlapping spheres along an arc (thick in the
+    middle, thin at the tips), so it needs nothing but basic shapes.
+    """
+    actor = Actor(name, root)
+    actor.lift = float(d.get("lift", 0.0))
+
+    body = hex_to_linear(d["fur"])
+    gold = hex_to_linear(d.get("accent", "#FFC93C"))
+
+    radius = 0.55
+    centre_z = 0.85
+    steps = 13
+
+    for i in range(steps):
+        t = i / float(steps - 1)
+        angle = math.radians(160 + 220 * t)  # a bowl opening upwards
+        size = 0.12 + 0.18 * math.sin(math.pi * t)
+
+        add_sphere(
+            f"{name}_Crescent{i}",
+            (radius * math.cos(angle), 0, centre_z + radius * math.sin(angle)),
+            (size, size * 0.8, size), body, root
+        )
+
+    add_eyes(actor, 0.12, -0.26, 0.36, 0.065)
+
+    mouth = add_sphere(
+        name + "_Mouth", (0, -0.235, 0.2), (0.07, 0.03, 0.012), BLACK, root
+    )
+    set_mouth(actor, mouth, (0.07, 0.03, 0.012), 0.06)
+
+    # Star tail above the right tip: a gold centre with four points.
+    star_x, star_z = 0.62, 1.3
+    add_sphere(
+        name + "_Star", (star_x, 0, star_z), (0.1, 0.06, 0.1), gold, root
+    )
+
+    for i in range(4):
+        angle = i * math.pi / 2
+        add_cone(
+            f"{name}_StarPoint{i}",
+            (
+                star_x + 0.14 * math.sin(angle),
+                0,
+                star_z + 0.14 * math.cos(angle)
+            ),
+            0.06, 0.2, gold, root, rotation=(0, angle, 0)
+        )
+
+    return actor
+
+
 def build_actor(name, design, x, scale):
     root = make_root(name, x, scale * float(design.get("height", 1.0)))
     kind = design.get("kind", "human")
+
+    if kind == "moon":
+        return build_moon(name, design, root)
 
     if kind in ("dog", "fox"):
         return build_animal(name, design, root)
@@ -514,7 +573,9 @@ def animate_actor(actor, x, base_scale, track, n_frames, rng):
         amp = track[frame - 1]
 
         bob = 0.035 * math.sin(math.tau * seconds / 1.4 + phase)
-        root.location = (x, 0, (bob + 0.07 * amp) * base_scale)
+        root.location = (
+            x, 0, (bob + 0.07 * amp) * base_scale + actor.lift
+        )
         root.rotation_euler[1] = 0.04 * math.sin(
             math.tau * seconds / 2.3 + sway_phase
         )
